@@ -2,8 +2,11 @@
 
 An Android-first personal memory assistant that uses the phone you already own.
 
-**Status:** Initial setup; offline-first implementation is next. No working
-application is available yet.
+**[Cross-platform product specification](docs/product-spec.md)**: shared behavior,
+native adapter guidance and release tests for Android, iOS, macOS and Windows.
+
+**Status:** Android has an unpublished test prototype, not a released app.
+Native-device validation and the three-language offline release gate remain open.
 
 ## Product direction
 
