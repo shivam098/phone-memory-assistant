@@ -1,6 +1,6 @@
 # Phone Memory Assistant: cross-platform product specification
 
-**Spec 0.1 · First-release contract, not release notes.** Help someone answer
+**Spec 0.1.1 · First-release contract, not release notes.** Help someone answer
 “What did we decide?” from material they chose to save, see the exact words behind
 the answer, and correct or forget them. Use devices people already own.
 
@@ -303,3 +303,30 @@ Choose model/runtime, licenses and offline packaging; supported OS/architecture
 floors; acceptable quality, latency, memory, thermal and battery limits; and any
 optional audio-retention period from evidence and user review. No model choice,
 benchmark result or all-day recording promise is assumed.
+
+## Optional ideas from Plaud
+
+These are candidates, not approved requirements. Establish the offline Hindi,
+English and Hinglish baseline on a handset before taking on new model work.
+The links describe Plaud's features; the adaptations below need no Plaud SDK,
+sign-in, cloud sync or marketplace prompts.
+
+- **Bookmark a moment** ([Plaud highlights](https://support.plaud.ai/hc/en-us/articles/63429919023385)).
+  The first idea to try needs no new model: during visible recording, tap to
+  mark the time and optionally type a short memo. Jump to the reviewed transcript
+  segment even after temporary audio is deleted. Label the memo as the user's
+  note, not spoken evidence; Forget removes both the bookmark and memo.
+- **Limit a question to chosen sources** ([Ask Plaud](https://support.plaud.ai/hc/en-us/articles/63429926029593);
+  [single-file timestamp links](https://support.plaud.ai/hc/en-us/articles/50636602977817)).
+  Add a scope picker to existing cited recall: *This conversation* or *Selected
+  sources*. Filter before retrieval, jump to the supporting passage, and say
+  “not found in these sources” even when an unselected file contains the answer.
+- **Suggest familiar spellings** ([Plaud custom vocabulary](https://support.plaud.ai/hc/en-us/articles/63429935673625)).
+  Let users opt into a device-local list of names, acronyms and Devanagari/Latin
+  aliases. Show proposed corrections for review; do not silently rewrite quotes.
+  Compare missed terms and false substitutions with vocabulary on and off.
+  This is not a fix for code-switched ASR.
+- **Show different views of one transcript, later** ([Plaud multidimensional summaries](https://support.plaud.ai/hc/en-us/articles/63429925078553)).
+  Group supported passages from the same revision into *Decisions*,
+  *Commitments* and *Open questions*. A missing owner or deadline stays
+  unknown; a commitment creates no external task.
