@@ -1,0 +1,17 @@
+Third-party components used by Phone Memory
+
+sherpa-onnx (K2 FSA / contributors), MediaPipe (Google / contributors),
+AndroidX and Kotlin: Apache License 2.0. See Apache-2.0.txt.
+https://github.com/k2-fsa/sherpa-onnx/tree/v1.12.14
+https://github.com/google-ai-edge/mediapipe
+https://developer.android.com/jetpack/androidx
+https://github.com/JetBrains/kotlin
+
+The static speech runtime includes ONNX Runtime (Microsoft / contributors);
+see the ONNX Runtime license and third-party notices.
+
+Optional weights are acquired separately:
+OpenAI Whisper: MIT (Whisper-MIT.txt). Multilingual Base ONNX conversion:
+https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base
+Qwen2.5-0.5B-Instruct (Qwen / Alibaba Cloud): Apache License 2.0.
+LiteRT conversion: https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct
