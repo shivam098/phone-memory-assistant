@@ -22,3 +22,14 @@ Thumbs.db
 /local-models/
 /private-data/
 /captures/
+.cxx/
+*.apk
+*.aab
+*.onnx
+*.task
+*.gguf
+*.wav
+*.m4a
+*.db
+*.db-*
+__pycache__/

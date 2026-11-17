@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<verification-metadata xmlns="https://schema.gradle.org/dependency-verification">
+    <configuration>
+        <verify-metadata>false</verify-metadata>
+        <verify-signatures>false</verify-signatures>
+        <!-- Maven dependencies use Google/Maven Central; additionally pin the upstream release AAR. -->
+        <trusted-artifacts>
+            <trust group="^(?!com\.k2fsa$).+" regex="true"/>
+        </trusted-artifacts>
+    </configuration>
+    <components>
+        <component group="com.k2fsa" name="sherpa-onnx-static-link-onnxruntime" version="1.12.14">
+            <artifact name="sherpa-onnx-static-link-onnxruntime-1.12.14.aar">
+                <sha256 value="05532ae681f14f13e22642db950b96ba20326db0d3da4fabf0b058ad6cd41f66"/>
+            </artifact>
+        </component>
+    </components>
+</verification-metadata>
