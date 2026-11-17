@@ -2,7 +2,8 @@
 
 An Android-first personal memory assistant that uses the phone you already own.
 
-**Status:** Planning and initial setup. No working application is available yet.
+**Status:** Initial setup; offline-first implementation is next. No working
+application is available yet.
 
 ## Product direction
 
@@ -17,10 +18,13 @@ then turn that context into useful, source-backed insights.
   separate approval.
 - Android comes first; iOS follows after the core experience is established.
 
+The first release is **offline-complete**: transcription and AI insights must
+work locally before cloud features are introduced. Initial speech support must
+cover Hindi, English and mixed Hinglish.
+
 Local-first describes the ownership and default handling of personal context.
-It does not require every AI task to run locally. Local and optional cloud
-capabilities will be selected through quality, latency, battery and privacy
-evaluation rather than assuming either approach is always better.
+Optional cloud processing may be added later with explicit consent, but is not
+a fallback for missing local capability in the initial release.
 
 ## Initial development sequence
 
@@ -33,8 +37,10 @@ evaluation rather than assuming either approach is always better.
 4. Selected read-only calendar and email connections.
 5. Explicitly authorized cloud assistance and separately approved actions.
 
-Model selection and the scope of offline generative features remain open.
-There are no measured performance or all-day recording guarantees.
+Exact model selection and supported insight complexity remain open. Evaluate
+both transcription and generation on representative phone hardware, including
+code-switched speech. There are no measured performance or all-day recording
+guarantees.
 
 ## Privacy and correctness requirements
 
