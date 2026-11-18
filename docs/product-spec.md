@@ -1,6 +1,6 @@
 # Phone Memory Assistant: cross-platform product specification
 
-**Spec 0.2 · First-release contract, not release notes.** Help someone answer
+**Spec 0.3 · First-release contract, not release notes.** Help someone answer
 “What did we decide?” from material they chose to save, see the exact words behind
 the answer, and correct or forget them. Use devices people already own.
 
@@ -43,8 +43,9 @@ Port guides: [Android](#android) · [iOS](#ios) · [macOS](#macos) ·
    modes. Show a short answer or recap and any stated commitment. Each factual
    claim opens its source at the quoted passage, with time offset for audio.
    Distinguish what was said from a suggestion; show conflicting evidence side
-   by side. Say “not in the saved sources” rather than guessing an owner, date
-   or answer. A commitment is not a scheduled reminder or a sent message.
+   by side. Say what the searched passages support and what is still waiting
+   for transcription. Never guess an owner, date or answer. A commitment is
+   not a scheduled reminder or a sent message.
 4. **Correct or forget.** Edit the passage in its source view; label user
    corrections as such, without rewriting the original audio. Withdraw outdated
    answers and rebuild from the corrected version. **Forget** previews the local
@@ -71,20 +72,66 @@ setup explanation. An unavailable insight model disables insights, not reading
 or searching existing notes. Neither state is “offline ready”. Never fabricate
 a transcript, show a simulated recording, or route a failed local job to the network.
 
-### Multi-hour storage and transcription
+### Battery-efficient all-day capture
 
-Store one session as one source with time-ordered, independently committed audio
-chunks. Bound each chunk, not the size or duration of a multi-hour source. Optional
-on-device voice-activity detection may skip storing silence; keep its time range
-distinct from an interruption and keep the mic indicator on while sampling.
+**R1 separates recording from inference.** An explicitly started session can
+keep capturing on battery; by default ASR and new insights run only on external
+power, with saver off, battery not low, safe thermal status and protected data
+accessible. Unplugging pauses automatic work. A thermal warning pauses any
+inference job at a safe checkpoint, including **Process now**. Plugging in may
+make queued work eligible; it never starts the mic.
 
-Transcribe chunks locally as they seal or defer them, for example until unlocked
-and charging. Show the user how much audio is pending (duration and bytes).
-Bound the backlog: warn before it fills; pause with a reason before storage or
-queue capacity runs out. Do not silently drop speech, claim it is transcribed,
-or start again when space returns. Commit each transcript with ASR provenance
-and **unreviewed** status without waiting for approval. Delete its working audio
-after that commit unless the user chose to keep it. Forget also removes queued audio.
+| What the user sees | Required behavior |
+| --- | --- |
+| **Waiting for charge** | Search and show existing transcripts, citations and saved insights on battery. State coverage for the requested interval, e.g. “3 h 20 min of captured audio waiting for charge.” Pending audio is not evidence that nothing was said. Distinguish queued speech, gated-out time and interruption gaps. |
+| **Process now** | For an urgent question, let the user select a time window and explicitly run its ASR/insight work on battery. Show progress and Cancel. This overrides only the external-power condition, not low-battery, saver, thermal, unlock or consent checks. Cancellation leaves unfinished chunks queued; it does not stop capture or grant a lasting override. |
+| **Paused to protect battery** | If OS battery saver activates or charge reaches the low-battery threshold, release the mic, seal the prefix and show a content-free notification with tap-to-resume. Reject Start/Resume while the guard is active. Clearing it or connecting power does not resume a paused recording. |
+
+Keep the screen-off capture path small:
+
+- **Input:** Use one mono 16 kHz input, or one native equivalent with a single
+  conversion if needed. No extra audio effects. Use large reusable buffers and
+  blocking reads or native event-driven callbacks. With the screen off, do no
+  UI refresh or diagnostics work beyond required indicator/control transitions.
+  Add no wake locks, polling timers, sensors, location requests or network traffic.
+- **Speech gate:** Apply a cheap loudness check, then a small local voice
+  activity detector (VAD). Keep only detected speech with short pre/post padding
+  from memory. Never write or transcribe stand-alone silence. Preserve skipped
+  time as metadata, not audio; the mic indicator stays on while sampling.
+- **Storage:** Append independently authenticated, encrypted chunks in time
+  order, batching roughly one minute of session time. Seal shorter batches on
+  pause or stop. Bound the chunk, not the multi-hour source. Use lossless audio
+  by default (e.g. FLAC); do not adopt a lossy codec until its ASR impact has
+  been measured across all three language modes.
+- **Backlog:** Show pending duration and bytes. Warn before the queue or disk
+  fills, then pause capture with a reason; never overwrite old speech or
+  silently restart. Commit transcripts locally with ASR provenance and
+  **unreviewed** status. Delete working audio after commit unless the user chose
+  to keep it. Forget also removes queued audio and invalidates running jobs.
+
+**Later candidates, off by default:** User-scheduled quiet hours could pause a
+session but would still require an explicit Resume. Duty-cycled listening
+(turning the mic off between samples) could miss the first words or an entire
+utterance. R1's speech gate instead evaluates continuous input during capture.
+
+### What dedicated recorders do
+
+**Design rationale, not measurements of this app.** The useful comparison is
+what a recorder does *during capture* versus what it defers.
+
+| Source | Documented behavior |
+| --- | --- |
+| [Plaud device comparison](https://www.plaud.ai/pages/plaud-device-comparison) | Plaud lists a record button and local storage. Its Note Pro offers an Endurance recording mode; its NotePin lists cloud upload while charging as a transfer option. That describes transfer, not on-device transcription. |
+| [NeoSapien Neo 1 FAQ](https://neosapien.ai/shop/ai-personal-assistant/) | Neo 1 advertises automatic listening with an active indicator. It can capture without internet while connected to the phone by Bluetooth; memories are processed when the phone is online again. Offline capture is not offline recall. |
+| [Omi firmware](https://github.com/BasedHardware/omi/blob/main/omi/firmware/readme.md) | The CV1 firmware encodes audio as Opus frames and buffers timestamped records to flash when disconnected. The phone can retrieve them later. |
+
+R1 borrows the separation, not the cloud dependency, automatic start or codec.
+[Zhidkov et al. (2018)](https://doi.org/10.3390/asi1010008) found that recording
+itself dominated background audio power on the Android phones tested. Moderate
+signal processing added comparatively little; consumption varied by model with
+no clear relationship to release year or chipset. That study did not measure
+our ASR or the OnePlus 8T. Measure each reference device; do not convert wearable
+runtime claims into a phone battery budget.
 
 ## Boundaries of permission
 
@@ -120,7 +167,7 @@ script. Normalized spellings or transliterations are search aids, not quotations
 | **Insight / commitment** | Local recap, answer or proposed task; attach evidence spans to **each claim**, plus producer/version. Distinguish quoted fact, inference, conflict and unknown. Task, owner and due time are separate; an unstated value is null, not inferred from the current user or clock. |
 | **Grant** | Capability (mic/read/egress/write), scope, purpose, validity/revocation and, for egress/write, destination and approved payload identity. A stored grant cannot override current OS state. Never reuse one kind for another. |
 | **Pending action** | Draft operation, exact payload/destination, source revisions, approval and operation ID. Persist the dispatch attempt before invoking the target. Distinguish draft, approved, cancelled, handed off, confirmed, failed and **outcome unknown**. If an in-flight attempt lacks a receipt after timeout or restart, check status if possible; never retry blindly. |
-| **Job / forget marker** | Jobs carry input IDs/revisions and a cancellation token. A durable, content-free marker blocks forgotten origins on future imports. Neither a job ID nor a cached answer is proof its inputs still exist. |
+| **Job / forget marker** | Jobs carry input IDs/revisions and a cancellation token. For queued audio, record the covered time window, checkpoint and wait reason. A durable, content-free marker blocks forgotten origins on future imports. Neither a job ID nor a cached answer is proof its inputs still exist. |
 
 | Adapter boundary | Operations and results a port must provide |
 | --- | --- |
@@ -131,7 +178,8 @@ script. Normalized spellings or transliterations are search aids, not quotations
 
 Return explicit `denied`, `cancelled`, `locked`, `model unavailable`, `no space`,
 `interrupted` or `stale input` results as applicable. “No matching evidence” is
-a successful search with no supported answer, not another name for a failed search.
+a successful search of the stated coverage, not another name for a failed
+search or audio that has not been processed.
 
 ### Storage, correction and forgetting
 
@@ -187,6 +235,12 @@ listing or available accelerator is not proof of offline support.
   service start rules](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start#wiu-exemptions);
   bring the user to the app if needed. Test a call, privacy toggle, Bluetooth
   loss and process kill. Never reacquire the mic on service recreation or boot.
+- Queue resumable chunk jobs in [WorkManager](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work)
+  or `JobScheduler` with charging and battery-not-low constraints. Observe
+  `PowerManager` saver and thermal status; recheck constraints while running.
+  Keep inference out of the microphone service. Respect [foreground service
+  type timeouts](https://developer.android.com/develop/background-work/services/fgs/timeout)
+  for the target OS; the `mediaProcessing` time limit is not a microphone timer.
 - Check the packaged ABI, local model load and available memory. Use app-private,
   no-backup storage and an Android Keystore-protected wrapping key. Set and test
   [backup rules](https://developer.android.com/identity/data/autobackup) for both
@@ -205,6 +259,11 @@ listing or available accelerator is not proof of offline support.
   controls; the indicator itself is not a pause button. Test both while locked
   and backgrounded on a physical iPhone. Pause if the controls cannot be kept
   available. A call or headset loss interrupts; its end is not a Resume gesture.
+- Request a `BGProcessingTask` with [`requiresExternalPower`](https://developer.apple.com/documentation/backgroundtasks/bgprocessingtaskrequest/requiresexternalpower)
+  set on its request. iOS chooses when to run it. Check charge level, Low Power
+  Mode, `ProcessInfo.thermalState` and protected-data access; checkpoint on
+  expiration. If the vault is locked, leave work queued rather than weakening
+  file protection. Run **Process now** as visible, cancellable foreground work.
 - Bundle or locally import model assets; check device memory and run both
   tasks on device. For the active chunk writer only, open a protected file
   before lock with [`completeUnlessOpen`](https://developer.apple.com/documentation/foundation/fileprotectiontype/completeunlessopen)
@@ -227,6 +286,8 @@ listing or available accelerator is not proof of offline support.
   remain accessible; a hidden menu-bar item does not qualify. Release input on
   sleep or route loss. Test lock, denial/revocation on the distributed build,
   USB mic removal and lid sleep/wake. No login recorder or system-audio capture.
+- Schedule automatic inference on AC power. Observe power-source changes, Low
+  Power Mode and `ProcessInfo.thermalState`; checkpoint if eligibility changes.
 - Package and load a local runtime for each claimed CPU architecture; verify
   any acceleration on that hardware. Keep encrypted files in non-synced,
   per-user Application Support with a non-synchronizing Keychain-protected key.
@@ -246,6 +307,10 @@ listing or available accelerator is not proof of offline support.
   Test default-device change, endpoint unplug, denied access, session lock and
   suspend/resume. If session lock hides the only controls, pause. A new default
   mic or a return from suspend requires an explicit Resume.
+- Use AC/battery and energy-saver [power notifications](https://learn.microsoft.com/en-us/windows/win32/power/power-setting-guids)
+  for inference eligibility. Checkpoint on unplug or OS thermal pressure. Verify
+  which thermal signals the target exposes; do not assume a CPU temperature
+  sensor is available or treat an unknown reading as evidence that it is cool.
 - Ship matching local runtime/model packs for each claimed architecture; test
   a CPU path rather than assuming a GPU/NPU. Store encrypted files in user-local
   non-roaming app data, not redirected Documents or OneDrive. Wrap the data key
@@ -289,8 +354,8 @@ typed note. Start with no other sources.
 Apply these gates on **each** proposed port; passing on Android does not certify
 a desktop or iOS build. Use synthetic or expressly consented fixtures only.
 
-- [ ] **Offline usefulness:** On a fresh install with local assets and radios
-  off, run note, import and visible mic → ASR → timeline → cited recall/short
+- [ ] **Offline usefulness:** On a fresh install with local assets, external
+  power and radios off, run note, import and visible mic → ASR → timeline → cited recall/short
   insight → correction → Forget. Run Hindi, English and within-utterance
   Hinglish. Without first reviewing the transcript, check the ASR words and
   each cited claim against the recording. A typed or corrected transcript, a desktop smoke
@@ -308,8 +373,17 @@ a desktop or iOS build. Use synthetic or expressly consented fixtures only.
 - [ ] **Locked storage and backlog:** While locked, verify only the active
   encrypted writer can append and that unrelated sources remain inaccessible.
   Defer ASR to exercise the visible backlog limit; expect a warning and safe
-  pause, not lost audio. Drain it after unlock: transcripts persist unreviewed
-  with provenance and working audio is removed unless retention was chosen.
+  pause, not lost audio. Drain it after unlock on external power: transcripts
+  persist unreviewed with provenance and working audio is removed unless retention was chosen.
+- [ ] **Battery and speech gate:** With the screen off and unplugged, capture a
+  consented fixture; verify no automatic ASR/insights and that recall reports
+  the backlog. Run **Process now** on one interval and cancel; other intervals
+  stay queued. Plug in to drain, then unplug or raise thermal pressure: workers
+  checkpoint without duplicates. Trigger saver/low battery: capture pauses and
+  stays off until a tap. Score gated and ungated runs against the same human
+  reference for soft speech, Hindi and code switches; count missed utterances and clipped
+  first/last words. Silence-only intervals produce no audio or ASR jobs. Pass
+  the agreed device budgets below without trading away the language gates.
 - [ ] **No egress:** Repeat cold start, capture, inference, search, failure and
   restart on an **otherwise online** device with no external grants. Observe
   app/SDK and delegated-service traffic, not just a network-denied UI. Expect
@@ -350,13 +424,14 @@ physical iPhone, Mac and Windows reference devices before claiming a port.
 | --- | --- |
 | Speech and retrieval | Compare transcripts with human references by language, script, noisy/quiet speech and code switch: word/character errors, lost negations, names and numbers. Measure retrieval of the right passage across query languages. |
 | Recall and insights | Human-check individual claims against cited spans; count unsupported claims, missing/wrong citations, correctly recognized unknowns and errors after correction/deletion. |
-| Cost to the user | Cold/warm time to first/final transcript, search and insight latency; peak resident RAM. For multi-hour capture with the screen locked, record speech/silence mix, battery drain per hour, thermal throttling, storage growth per hour, peak pending audio (minutes/bytes) and time to clear it. Report conditions, including charging, and repeat runs. |
+| Latency and capacity | Cold/warm time to first/final transcript, search and insight latency; peak resident RAM, storage growth per hour, peak pending audio (minutes/bytes) and time to clear it. |
+| Battery and heat | On the same build/device, repeat matched screen-off runs: **idle** (mic off), **capture only** (read/discard), **capture + gate + encrypted writes**, then **on-charger processing** of the same backlog. Log duration, speech/silence mix and temperature. For unplugged runs report total mAh, mAh/hour and charge percentage points/hour, including the increase over idle. Use a charge counter or external meter; label unavailable readings. On charger, measure audio minutes processed per hour, temperature and throttling, not net battery percentage as an energy estimate. |
 
-R1 targets all-day sessions. Set battery, thermal, storage and transcription-backlog
-budgets from **OnePlus 8T measurements** before Android sign-off; a full day on
-one charge is not a measured result. Model/runtime, licenses and offline packaging,
-OS/architecture floors, quality, latency, memory limits and any optional
-audio-retention period remain open.
+R1 targets battery-efficient all-day sessions. Agree battery, thermal, storage,
+backlog and speech-miss budgets **with the user from OnePlus 8T measurements**
+before Android sign-off; a full day on one charge is not a measured result.
+Model/runtime, licenses and offline packaging, OS/architecture floors, quality,
+latency, memory limits and any optional audio-retention period remain open.
 
 ## Optional ideas from Plaud
 
