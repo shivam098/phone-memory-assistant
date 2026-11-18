@@ -1,6 +1,6 @@
 # Phone Memory Assistant: cross-platform product specification
 
-**Spec 0.1.1 · First-release contract, not release notes.** Help someone answer
+**Spec 0.2 · First-release contract, not release notes.** Help someone answer
 “What did we decide?” from material they chose to save, see the exact words behind
 the answer, and correct or forget them. Use devices people already own.
 
@@ -16,12 +16,12 @@ R1 needs no wearable, privileged OS access, provider sign-in, network service
 or cross-device sync.
 
 **Android M1 evidence (unpublished test APK).** The prototype limits mic clips
-to 25 seconds in the foreground, requires transcript review before saving, and
-can select a verbatim source highlight or abstain. In a desktop ASR smoke test,
-one English sentence was correct; the Hindi and code-switched transcripts were
-incorrect. There is no native-device validation yet, including on the OnePlus
-8T. The clip limit is not a port requirement, and these results do not establish
-R1 language quality or local insight quality.
+to 25 seconds in the foreground, discards the active clip on lock, and requires
+transcript review before saving. These are prototype limits, not the R1 capture
+contract. It can select a verbatim source highlight or abstain. In a desktop
+ASR smoke test, one English sentence was correct; the Hindi and code-switched
+transcripts were incorrect. There is no native-device validation yet, including
+on the OnePlus 8T. All-day capture and R1 language/insight quality remain unverified.
 
 Port guides: [Android](#android) · [iOS](#ios) · [macOS](#macos) ·
 [Windows](#windows). All four use the [same release checklist](#release-and-port-conformance-checklist).
@@ -32,9 +32,11 @@ Port guides: [Android](#android) · [iOS](#ios) · [macOS](#macos) ·
    Preview what will be copied, then save or cancel. No microphone permission is
    needed. The selection authorizes that item only, not its folder. Reject
    unsupported input or a cloud-only placeholder without silently fetching it.
-2. **Remember a conversation.** With everyone informed and agreeing, the user
-   starts the microphone, sees when it is actually recording, and stops it.
-   On-device automatic speech recognition (ASR) produces time-linked segments.
+2. **Remember conversations throughout the day.** With participants informed
+   and agreeing, the user taps **Start**, pockets the phone and later taps
+   **Stop**. Screen lock and switching apps do not interrupt a visible, active
+   session. On-device automatic speech recognition (ASR) saves time-linked
+   transcripts labeled **machine-transcribed, unreviewed**; review is optional.
    Saved notes, imports and transcripts appear in one encrypted local timeline
    with source, date (capture/import date if event date is unknown) and processing state.
 3. **Recall and check.** Search or ask a question in any of the three language
@@ -50,26 +52,46 @@ Port guides: [Android](#android) · [iOS](#ios) · [macOS](#macos) ·
 
 ## Capture lifecycle
 
+**R1 requires an all-day listening session, not an always-on microphone.** The
+user starts it once. It continues until stopped, including through screen lock
+and app backgrounding, while the OS still permits capture and the recording
+indicator and controls remain available. Keeping the display lit is not required.
+
 | Event | Required transition and user-visible result |
 | --- | --- |
-| Start from **Idle** | Only an explicit user gesture starts a session. Explain recording and local retention; ask the user to confirm participant consent. Check OS permission, selected input, protected storage and local ASR readiness. Show **Starting**, not “listening”, until the stream delivers frames. |
-| **Recording** | Show the active input, elapsed recorded time and accessible **Pause** and **Stop** controls; do not rely on color alone. Derive progress from captured frames, not a UI timer. If the OS silences the input or frames cease, report the interruption; ordinary quiet speech is not a device error. |
-| Pause or interruption | Close the input on pause, call/audio interruption, input change, lock, suspend, loss of permission or inability to keep controls visible and storage protected. Seal the captured prefix, mark the gap/reason, show **Paused** or **Interrupted**. Do not silently switch to another mic. |
-| Resume | Only a fresh user gesture can resume. Recheck input, permissions, consent and storage; start a new contiguous audio span. Unlock, wake, route recovery, relaunch and boot are **not** gestures. No concealed startup recording. |
-| Stop or discard | Stop releases the mic **before** finalizing and transcribing. Ignore late input callbacks after pause, stop or cancel, including a delayed start. Discard purges the unsaved session. Cancelling processing on an already saved source removes partial outputs, keeps the source and offers a local retry or Forget. Neither operation restarts capture. |
-| Failure or process death | Return with mic off. Identify any recoverable *encrypted* prefix as incomplete; offer to keep or discard it. Never fill gaps or publish a complete transcript for a failed job. Report denial, low space, locked storage and unsupported hardware distinctly. |
+| Start from **Idle** | Require an explicit user gesture. Explain who may be recorded, that recording continues when locked, how to pause, and what is retained. Ask the user to confirm participant consent. Check OS permission, input, visible controls, protected storage and local ASR readiness. Show **Starting**, not “listening”, until frames arrive. |
+| **Recording**, including while locked | Keep a persistent, content-free OS-visible indicator and accessible **Pause** and **Stop**. Provide one-tap Pause from the ongoing notification or equivalent lock-screen control. Show active input and elapsed capture time from real frames, not a UI timer. Do not rely on color alone. |
+| Pause or interruption | Release the mic on Pause, call, mic contention or OS silencing, permission/privacy-toggle revocation, route loss/change, capture suspension or stalled frames. Also pause if the indicator, controls or protected writer become unavailable. Seal the captured prefix, mark a gap with its reason and show **Paused** or **Interrupted** without personal content. Never switch inputs silently. |
+| Resume | Only an explicit **Resume** gesture starts a new span, after rechecking consent, OS access, input, storage and controls. Tapping the app's Android notification **Resume** action counts. Unlock, wake, end of a call, route recovery, service recreation, boot and relaunch do not. |
+| Stop or discard | **Stop** releases the mic immediately and closes capture; already queued local transcription may finish without it. Ignore late callbacks, including delayed starts. Discard purges session content and dependent work. Cancelling a job on a saved source removes partial outputs and offers retry or Forget. None of these restarts recording. |
+| OS kill or process death | Do not depend on a shutdown callback. On recovery, keep the mic off, seal the prefix at the last authenticated chunk and mark the remaining interval interrupted (reason unknown if necessary). Offer to keep or discard the prefix. Never reconstruct missing words, report complete coverage, or auto-resume. |
 
 An absent or invalid ASR model disables audio start/transcription with a local
 setup explanation. An unavailable insight model disables insights, not reading
 or searching existing notes. Neither state is “offline ready”. Never fabricate
 a transcript, show a simulated recording, or route a failed local job to the network.
 
+### Multi-hour storage and transcription
+
+Store one session as one source with time-ordered, independently committed audio
+chunks. Bound each chunk, not the size or duration of a multi-hour source. Optional
+on-device voice-activity detection may skip storing silence; keep its time range
+distinct from an interruption and keep the mic indicator on while sampling.
+
+Transcribe chunks locally as they seal or defer them, for example until unlocked
+and charging. Show the user how much audio is pending (duration and bytes).
+Bound the backlog: warn before it fills; pause with a reason before storage or
+queue capacity runs out. Do not silently drop speech, claim it is transcribed,
+or start again when space returns. Commit each transcript with ASR provenance
+and **unreviewed** status without waiting for approval. Delete its working audio
+after that commit unless the user chose to keep it. Forget also removes queued audio.
+
 ## Boundaries of permission
 
 | Permission | What it permits | What it does **not** permit |
 | --- | --- | --- |
 | OS mic permission | The app may request the input while OS policy allows. Recheck on use. | Starting a recording, or consent on behalf of anyone nearby. |
-| Participant consent and user start | This visible recording, for the purpose just shown. If anyone objects, do not record; use a note instead. | Future sessions, call-audio capture, sharing or any external action. |
+| Participant consent and user start | This visible session only. The user must inform participants and get their agreement; pause when someone new joins until they agree. If anyone objects, do not record. | The app obtaining consent on others' behalf. Neither the start tap nor the persistent indicator substitutes for their agreement or authorizes future sessions, call audio, sharing or actions. |
 | Source read | Import the chosen item. **Later:** read a specifically authorized personal calendar or Gmail selection, with the narrowest available read-only scope. Show the real provider scope and apply any narrower user filter. On revocation, cancel pending reads and stop new ones; offer Forget for saved copies. | Cloud AI processing, creating events, replying to mail, or reading other apps. |
 | Cloud processing (**later, opt-in per request**) | Review the **exact** passages, question and metadata to be sent, named destination and purpose. Send only that payload after approval; cancel before dispatch means no send. | Uploading the timeline, continuing permission, writing to a service, or fallback when local capability is missing. |
 | External write or export (**later**) | Preview the exact fields/text/file, operation and destination/recipient; approve this action only. Prefer a user-controlled save dialog or composer. Changing the payload or target requires new approval. | Autonomous sends, calendar changes on read permission, or claiming a handoff means delivery. |
@@ -92,7 +114,7 @@ script. Normalized spellings or transliterations are search aids, not quotations
 | Record | Minimum information and invariant |
 | --- | --- |
 | **Source** | Stable `sourceId`, monotonic `revision`, kind (note/import/mic; connector later), display label, capture/import time, optional event time and zone, local payload reference, processing/coverage state. Record origin identity when available for duplicate/forget checks. |
-| **Segment** | `sourceId`, `revision`, `segmentId`, order, original-script text and provenance (typed/imported/ASR/user-corrected). For audio, `[startMs,endMs)` on the retained media timeline, excluding pauses; retain gap boundaries separately. No fake offsets for text notes. |
+| **Segment** | `sourceId`, `revision`, `segmentId`, order, original-script text, provenance (typed/imported/ASR/user-corrected) and ASR review state. For audio, `[startMs,endMs)` on the session timeline, plus chunk/media offsets when audio exists. Keep pause/interruption ranges and reasons, and skipped silence, distinct so later citations do not shift. No fake offsets for text notes. |
 | **Index entry** | Local search term or other retrieval key → source revision, segment and text span. Return hits only for live revisions. Derived indexes, including any embeddings, get the same protection as the originals. |
 | **Evidence span** | Source ID + revision + segment ID + half-open text range in Unicode scalar values of that segment, not platform string indices. Resolve against the stored text for the exact quote; use segment timing for audio. No playback link if audio was not kept. |
 | **Insight / commitment** | Local recap, answer or proposed task; attach evidence spans to **each claim**, plus producer/version. Distinguish quoted fact, inference, conflict and unknown. Task, owner and due time are separate; an unstated value is null, not inferred from the current user or clock. |
@@ -103,7 +125,7 @@ script. Normalized spellings or transliterations are search aids, not quotations
 | Adapter boundary | Operations and results a port must provide |
 | --- | --- |
 | Input and capture | `pickLocal()` yields selected bytes/type/origin or cancel; `start(input, consent)` yields a session or reason. Emit frames, route/permission changes, interruptions and end. Expose pause/resume/stop/discard. Do not let capture code invoke a connector. |
-| Local models | `probe(task, languages)` checks installed assets, integrity, architecture and resources for **ASR and insights separately**. `transcribe(audio, cancel)` yields segments; `derive(question, evidence, cancel)` yields supported claims or abstains. No network backend. |
+| Local models | `probe(task, languages)` checks installed assets, integrity, architecture and resources for **ASR and insights separately**. `transcribe(chunk, cancel)` yields time-linked, unreviewed segments; `derive(question, evidence, cancel)` yields supported claims or abstains. No network backend. |
 | Protected store and retrieval | `save`, `timeline`, `search`, `resolve(span)`, `correct` and `forget` operate on local records. Commit job output atomically only if **all** input revisions are current and none was forgotten. Apply the same check before displaying a late result. |
 | Optional external I/O | Separate `read(scope)`, `processApproved(payload, destination)` and `performApproved(action)` entry points. Bind approval to the reviewed bytes/fields, revisions and target; recheck at dispatch. The offline pipeline must run with **none** of these adapters installed. |
 
@@ -116,11 +138,17 @@ a successful search with no supported answer, not another name for a failed sear
 - **At rest:** Encrypt recordings, source text, metadata, indexes, derived
   outputs and temporary files (including database journals and model input
   caches). Protect the data-encryption key with native user/device key storage.
-  Fail closed if it cannot be opened. Keep working audio only as needed for ASR;
-  retaining replayable audio beyond that requires a visible choice. No content
+  Fail closed if protected storage is unavailable. No content
   in telemetry, logs, crash reports, notifications or system search indexes.
   Exclude the store, staging files and key material from default backup, sync
   and unintended device transfer. A sandbox or disk encryption alone is not enough.
+- **Active capture while locked:** Unwrap a per-session data key at explicit
+  session start; persist only its wrapped form for later authorized processing.
+  The recorder holds the unwrapped key only in memory while capturing. After
+  lock it may **append only** authenticated, encrypted chunks to that session;
+  it may not read the vault, open other sources or expose transcripts. Release
+  the capture key on pause, interruption or stop. If Resume needs an unlock to
+  regain the key, request it; unlocking by itself never starts the mic.
 - **Correct:** Publish a new revision and immediately invalidate old search
   hits, citations, insights, displayed/cached answers and unsent actions depending
   on the old one. Re-index/recompute from current sources. Never point an old
@@ -152,9 +180,13 @@ listing or available accelerator is not proof of offline support.
 - Use `AudioRecord` with runtime `RECORD_AUDIO`. For continued background
   capture, start a [microphone foreground service](https://developer.android.com/develop/background-work/services/fgs/service-types#microphone)
   from visible user interaction, with the applicable manifest permissions/type
-  and ongoing notification controls. If controls cannot be shown, pause before
-  leaving the foreground. Test a call, mic privacy toggle, Bluetooth loss,
-  screen lock and process kill; neither service recreation nor boot may restart the mic.
+  and a content-free ongoing notification with **Pause** and **Stop**. Verify
+  the notification and actions remain available through screen lock and app
+  switching; if hidden or blocked, do not continue background capture. After
+  interruption, offer **Resume** by notification tap subject to [foreground
+  service start rules](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start#wiu-exemptions);
+  bring the user to the app if needed. Test a call, privacy toggle, Bluetooth
+  loss and process kill. Never reacquire the mic on service recreation or boot.
 - Check the packaged ABI, local model load and available memory. Use app-private,
   no-backup storage and an Android Keystore-protected wrapping key. Set and test
   [backup rules](https://developer.android.com/identity/data/autobackup) for both
@@ -168,16 +200,20 @@ listing or available accelerator is not proof of offline support.
 
 - Use AVFoundation capture with an [`AVAudioSession` recording category](https://developer.apple.com/documentation/avfaudio/avaudiosession/category-swift.struct/record),
   a microphone usage description and [capture authorization](https://developer.apple.com/documentation/avfoundation/requesting-authorization-to-capture-and-save-media).
-  Keep recording state and stop/pause visible. Default to pausing when losing
-  foreground controls. Background audio, if used, is only for an ongoing
-  user-started recording. Test lock, a phone interruption and headset removal;
-  an interruption-ended notification is not consent to resume.
+  Enable the background audio mode **only for an ongoing user-started recording**.
+  Keep the system recording indicator and provide lock-screen Pause/Stop
+  controls; the indicator itself is not a pause button. Test both while locked
+  and backgrounded on a physical iPhone. Pause if the controls cannot be kept
+  available. A call or headset loss interrupts; its end is not a Resume gesture.
 - Bundle or locally import model assets; check device memory and run both
-  tasks on a physical iPhone. Use app-private Application Support with complete
-  file protection (Data Protection), an unlocked-only, [device-only Keychain item](https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlockedthisdeviceonly)
-  that does not synchronize, and explicit [backup exclusion](https://developer.apple.com/documentation/foundation/urlresourcevalues/isexcludedfrombackup).
-  Close protected files and release unwrapped keys on lock. Test backup/restore
-  and migration; file protection alone does not exclude files from backups.
+  tasks on device. For the active chunk writer only, open a protected file
+  before lock with [`completeUnlessOpen`](https://developer.apple.com/documentation/foundation/fileprotectiontype/completeunlessopen)
+  and append independently encrypted chunks. Close the writer when capture
+  ends. Keep other files under complete protection in private Application
+  Support; close them and release unrelated keys on lock. Use an unlocked-only,
+  non-synchronizing [device-only Keychain item](https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlockedthisdeviceonly)
+  to protect session keys. Apply [backup exclusion](https://developer.apple.com/documentation/foundation/urlresourcevalues/isexcludedfrombackup)
+  to the writer too; test backup/restore and migration.
 - Use a document picker or share extension for selected material only; protect
   and clean any extension staging area. A later share sheet or event editor is
   a reviewed handoff, not access to Messages or Mail history.
@@ -187,9 +223,10 @@ listing or available accelerator is not proof of offline support.
 - Use AVFoundation or Core Audio input, a microphone usage description, TCC
   (macOS privacy approval) and the [audio-input entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.audio-input)
   as applicable to the signed sandbox/hardened build. Provide window or menu-bar
-  recording controls; release input on lock, sleep, route loss or loss of those
-  controls. Test denial and revocation on the distributed build, USB mic removal
-  and lid sleep/wake. No login recorder or system-audio capture.
+  recording controls. On screen lock, continue only if the indicator and controls
+  remain accessible; a hidden menu-bar item does not qualify. Release input on
+  sleep or route loss. Test lock, denial/revocation on the distributed build,
+  USB mic removal and lid sleep/wake. No login recorder or system-audio capture.
 - Package and load a local runtime for each claimed CPU architecture; verify
   any acceleration on that hardware. Keep encrypted files in non-synced,
   per-user Application Support with a non-synchronizing Keychain-protected key.
@@ -207,7 +244,8 @@ listing or available accelerator is not proof of offline support.
   model requires it; classic desktop apps use desktop-app privacy controls,
   not necessarily a per-app prompt. Keep pause/stop in the window or tray.
   Test default-device change, endpoint unplug, denied access, session lock and
-  suspend/resume. Do not follow a new default mic without user confirmation.
+  suspend/resume. If session lock hides the only controls, pause. A new default
+  mic or a return from suspend requires an explicit Resume.
 - Ship matching local runtime/model packs for each claimed architecture; test
   a CPU path rather than assuming a GPU/NPU. Store encrypted files in user-local
   non-roaming app data, not redirected Documents or OneDrive. Wrap the data key
@@ -254,9 +292,24 @@ a desktop or iOS build. Use synthetic or expressly consented fixtures only.
 - [ ] **Offline usefulness:** On a fresh install with local assets and radios
   off, run note, import and visible mic → ASR → timeline → cited recall/short
   insight → correction → Forget. Run Hindi, English and within-utterance
-  Hinglish. Score the unedited transcript before user review; check each claim
-  and citation afterwards. A typed or corrected transcript, a desktop smoke
+  Hinglish. Without first reviewing the transcript, check the ASR words and
+  each cited claim against the recording. A typed or corrected transcript, a desktop smoke
   test or a verbatim highlight alone cannot pass this native end-to-end gate.
+- [ ] **All-day capture:** Start a multi-hour handset session; background the
+  app and lock the screen. Speak distinct synthetic markers before and during
+  lock. Both appear in order without another Start. Exercise one-tap Pause
+  from the lock screen, then Resume. Interrupt with a call; ending it must
+  not reopen the mic. Tap **Resume** (Android: the notification action).
+  Force-kill the recording process mid-chunk; unlock and relaunch without
+  resuming. Verify a sealed prefix, marked gaps/reasons, content-free status
+  and no frames in the gaps. Resume explicitly, then Stop; wake and boot must
+  not start new audio. On desktop repeat with input contention and sleep/wake;
+  expect a marked pause on lock if the OS hides the controls.
+- [ ] **Locked storage and backlog:** While locked, verify only the active
+  encrypted writer can append and that unrelated sources remain inaccessible.
+  Defer ASR to exercise the visible backlog limit; expect a warning and safe
+  pause, not lost audio. Drain it after unlock: transcripts persist unreviewed
+  with provenance and working audio is removed unless retention was chosen.
 - [ ] **No egress:** Repeat cold start, capture, inference, search, failure and
   restart on an **otherwise online** device with no external grants. Observe
   app/SDK and delegated-service traffic, not just a network-denied UI. Expect
@@ -266,7 +319,7 @@ a desktop or iOS build. Use synthetic or expressly consented fixtures only.
   remove or corrupt each model independently, lock the store and exhaust free
   space. Expect specific unavailable states, no false success and no plaintext
   fallback. Exercise the native interruptions above: no frames while paused,
-  no recording after stop, kill, reboot or wake without a new gesture.
+  and no restart on call end, kill/relaunch, reboot or wake without a new gesture.
 - [ ] **Protection:** Use a unique synthetic phrase. Inspect files, indexes,
   journals, temp/cache directories, logs and crash diagnostics after normal
   use and a forced exit; no plaintext content. Check actual default backup,
@@ -297,12 +350,13 @@ physical iPhone, Mac and Windows reference devices before claiming a port.
 | --- | --- |
 | Speech and retrieval | Compare transcripts with human references by language, script, noisy/quiet speech and code switch: word/character errors, lost negations, names and numbers. Measure retrieval of the right passage across query languages. |
 | Recall and insights | Human-check individual claims against cited spans; count unsupported claims, missing/wrong citations, correctly recognized unknowns and errors after correction/deletion. |
-| Cost to the user | Cold/warm time to first/final transcript, search and insight latency; peak resident RAM and disk use; energy/battery and thermal throttling over a repeatable recording duration. Report sample counts, distributions and conditions. |
+| Cost to the user | Cold/warm time to first/final transcript, search and insight latency; peak resident RAM. For multi-hour capture with the screen locked, record speech/silence mix, battery drain per hour, thermal throttling, storage growth per hour, peak pending audio (minutes/bytes) and time to clear it. Report conditions, including charging, and repeat runs. |
 
-Choose model/runtime, licenses and offline packaging; supported OS/architecture
-floors; acceptable quality, latency, memory, thermal and battery limits; and any
-optional audio-retention period from evidence and user review. No model choice,
-benchmark result or all-day recording promise is assumed.
+R1 targets all-day sessions. Set battery, thermal, storage and transcription-backlog
+budgets from **OnePlus 8T measurements** before Android sign-off; a full day on
+one charge is not a measured result. Model/runtime, licenses and offline packaging,
+OS/architecture floors, quality, latency, memory limits and any optional
+audio-retention period remain open.
 
 ## Optional ideas from Plaud
 
