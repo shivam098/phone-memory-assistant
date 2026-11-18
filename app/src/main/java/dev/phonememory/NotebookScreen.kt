@@ -62,7 +62,7 @@ fun NotebookScreen(book: Notebook, pickText: () -> Unit, start: (UUID?, Boolean)
             if (confirmCapture) AlertDialog(onDismissRequest = { confirmCapture = false },
                 title = { Text("Listen while the phone is locked?") },
                 text = { Text(if (baseline) "Mic-only battery test: confirm everyone's consent. Audio is read and discarded, never saved. Controls remain in the notification."
-                    else "Confirm everyone present agrees to be recorded. Speech is kept encrypted until local transcription. Recording continues in the background. Use the notification to pause or stop. No call audio.") },
+                    else "Confirm everyone agrees to recording, including while locked. After first unlock, background processing can read pending audio; someone who gains that access could read it too. Saved memories still need unlock. Use the notification to pause or stop.") },
                 confirmButton = { TextButton(onClick = { confirmCapture = false; start(resumeId, baseline) }) { Text("Everyone agrees • start") } },
                 dismissButton = { TextButton(onClick = { confirmCapture = false }) { Text("Cancel") } })
             LazyColumn(
@@ -88,6 +88,7 @@ fun NotebookScreen(book: Notebook, pickText: () -> Unit, start: (UUID?, Boolean)
                         }
                     } else live.reason?.let { Text("Microphone off • ${it.label}") }
                     Text("Pending transcription: ${backlog.count} chunks • ${backlog.samples / SAMPLE_RATE} s • ${backlog.bytes / 1024} KiB")
+                    if (book.awaitingUnlock > 0) Text("${book.awaitingUnlock} sealed passage(s) awaiting unlock and verification; not yet searchable.")
                     if (backlog.nearlyFull) {
                         Text("Audio queue nearly full. Process pending audio or forget a session before capture pauses.")
                     }
@@ -157,6 +158,10 @@ fun NotebookScreen(book: Notebook, pickText: () -> Unit, start: (UUID?, Boolean)
                             Text("${seg.provenance.name.replace('_', ' ')} • r${source.revision} • passage ${seg.id.toString().take(8)}" +
                                 (seg.startMs?.let { " • ${it / 1000}–${(seg.endMs ?: it) / 1000} s" } ?: ""))
                             Text(seg.text)
+                            seg.pick?.let { pick -> pick.resolve(source, seg)?.let { h ->
+                                Text("Model-selected highlight: “${h.text}” · line ${h.line}", style = MaterialTheme.typography.bodyMedium)
+                                Text(pick.producer, style = MaterialTheme.typography.labelSmall)
+                            } }
                             if (seg.producer.isNotEmpty()) {
                                 Text(seg.producer, style = MaterialTheme.typography.labelSmall)
                                 TextButton(enabled = idle, onClick = { editing = true }) { Text("Review passage") }
@@ -207,7 +212,7 @@ fun NotebookScreen(book: Notebook, pickText: () -> Unit, start: (UUID?, Boolean)
                         }
                         item {
                             Text("All-day listening", style = MaterialTheme.typography.titleMedium)
-                            Text("Capture without an ASR model. Only speech candidates are kept. Transcription waits for charging and unlock; Process now is available in each session.")
+                            Text("Only speech candidates are kept. After the first unlock since restart, charging can transcribe while locked. Saved memories stay closed. Process now requires an unlocked phone.")
                             if (Model.SPEECH in book.installed) {
                                 Text("Language hint • try हिन्दी if Auto misses Hindi or Hinglish.")
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

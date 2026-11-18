@@ -57,7 +57,13 @@ The picker copies can be removed after successful installation.
   threshold (default 15%) pauses capture. **These are guards, not a battery-life
   guarantee.** See pending duration/bytes before relying on Recall.
 - **Transcription:** normal jobs run on external power with battery not low,
-  saver off, safe thermal status and the notebook unlocked. For an urgent
+  saver off and safe thermal status. After the first unlock since restart,
+  they can transcribe queued speech **while the phone is locked**. They cannot
+  read saved memories. A locked job seals its new transcript and any
+  model-selected excerpt before deleting its input. The content-free status
+  **“Transcribed overnight — available after unlock”** does not mean the result
+  is searchable yet. Unlock-time verification rejects changed or forgotten
+  inputs before making passages available. For an urgent
   query, open a session and **Process now** for a chosen recent time window.
   Local ASR passages are stored as **unreviewed**, with model provenance and
   coarse chunk timing. Review/correcting is optional. Successful publication
@@ -70,7 +76,11 @@ The picker copies can be removed after successful installation.
   imports, interrupted work and unsupported output do not produce fake results.
 
 M1 notes/imports/reviewed transcripts migrate locally with their IDs and
-timestamps on first unlock. Upgrade in place using the same signing key;
+timestamps on first unlock. After upgrading from M2, open the app once with
+a secure screen lock unlocked to migrate pending audio and provision the
+overnight key. **Tradeoff:** access equivalent to the background worker on a
+stolen, already-booted phone can expose still-pending audio. That access does
+not decrypt the saved journal or closed results. Upgrade in place using the same signing key;
 uninstalling first deletes the notebook. Use synthetic data for this build.
 
 See the [model evidence and handset test guide](docs/handset-check.md) for

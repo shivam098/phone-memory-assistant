@@ -54,14 +54,30 @@ None of the above is a measurement of a OnePlus 8T.
   the capture timeline, not word alignment. Long silences can lie inside those
   bounds. The optional [Qwen2.5 0.5B int8](https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/tree/49bfd323c25c9dae2118906e1f3ffd16e0729b13)
   (Apache-2.0) selects a verbatim highlight or abstains.
-- Each source has a random AES-256 data key wrapped by an unlocked-device
-  Android Keystore key. While locked only the active writer retains its
-  session key. Files have random IVs and GCM authenticates their source and
+- Saved sources have AES-256 data keys wrapped by an unlocked-only Android
+  Keystore key. Capture state and pending audio instead use a separate
+  per-session key wrapped by an after-first-unlock Keystore key. Each pending
+  chunk includes its own wrapped content key, removed with the chunk.
+  Both domains use normal credential-encrypted storage; no direct-boot
+  worker or device-protected copy exists. The capture writer cannot unwrap
+  journal keys. Files have random IVs and GCM authenticates their source and
   record identity. Headers, gaps, audio, text and provenance are encrypted
   under `noBackupFilesDir`; opaque directory IDs, file counts and sizes are
   not hidden from a filesystem observer. M1 records are retired individually
-  **after** committing and verifying a matching v2 source. Atomic revision
-  publication precedes audio unlink; recovery finishes interrupted cleanup.
+  after verifying the migrated copy. Old M2 audio is re-encrypted and verified
+  on the first unlocked app open. The journal key is **never** rewrapped as a
+  background-accessible key.
+- A charging worker reads its assigned chunk, not saved memories. It seals a
+  new unreviewed transcript and optional highlight from that transcript only
+  using fresh AES-GCM keys wrapped to a pinned RSA-OAEP public key. The
+  [unlock-required private key](https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec.Builder#setUnlockedDeviceRequired(boolean))
+  never runs in the locked worker. A session-authenticated job receipt binds
+  the sealed payload to its source, expected revision and chunk. The file and
+  directory are synced before deleting the audio and its one-time key.
+  After unlock, compatible sibling chunks merge in one atomic source revision.
+  Replays are ignored; changed or forgotten inputs are never reintroduced.
+  Android can defer the merge worker; opening the notebook also attempts the
+  merge before presenting results. Unreadable envelopes stay sealed.
   Search/quotes bind to source ID, exact revision, segment ID and half-open
   Unicode-scalar range. Forget detaches the entire source directory before
   cleanup; late workers cannot recreate it. It is not forensic flash erasure.
@@ -94,9 +110,9 @@ None of the above is a measurement of a OnePlus 8T.
 5. On battery, confirm pending seconds/bytes grow with speech but not silence.
    Fill the queue with no ASR model; expect a visible warning then a pause,
    not overwrite. Test low space, battery saver and the adjustable 15% guard;
-   no auto-resume when the condition clears. While charging but locked or
-   thermally constrained, pending audio stays queued. Unlock and check it
-   drains. Test loss of the constraints during a job, cancellation of Process
+   no auto-resume when the condition clears. While thermally constrained or
+   before the first unlock after restart, pending audio stays queued. Run the
+   locked-charging test below. Test loss of the constraints during a job, cancellation of Process
    now, revision changes/Forget during processing, restart and backup/transfer
    exclusion with synthetic data.
 6. Human-check soft and normal Hindi, English and mixed Hinglish with and
@@ -106,6 +122,49 @@ None of the above is a measurement of a OnePlus 8T.
    correction, quote invalidation and abstention. The earlier **desktop**
    smoke reproduced one synthetic English sentence, but misrecognized Hindi
    and mixed examples even with a Hindi hint. It is not a handset score.
+
+## Overnight locked-charging gate (not yet run on the 8T)
+
+1. Use a secure PIN/password and **synthetic** fixtures on an ARM64 test
+   phone. Upgrade M2 in place, open the notebook unlocked once, install the
+   multilingual ASR model, and verify an existing note is still readable.
+   Record and stop two short clips on battery. Leave one old searchable note
+   as a control. Disable networking.
+2. Reboot on external power **without unlocking**. Expect no transcription,
+   microphone or access to either storage class. Temporarily disconnect power,
+   unlock once with the credential, then relock before reconnecting power.
+   Leave the phone locked, cool, charging and above the low-battery threshold.
+   Repeat with a cold worker process; do not force-stop the app for this
+   test, as Android suppresses scheduled work for force-stopped packages.
+3. Before unlocking, verify the mic is off and the only result notification
+   reads **“Transcribed overnight — available after unlock”**. No source
+   label, quote or preview should appear. On this dedicated debug fixture,
+   count `.chunk`, `.sealed` and `.rev` files via `run-as` **without reading
+   content**. Successful ASR removes the two input chunks (and wrapped
+   per-chunk keys), leaves sealed outputs, and creates no journal revision
+   until unlock. Work that runs only after morning unlock is not a pass.
+4. Unlock. Both unchanged passages should become searchable exactly once,
+   with model provenance, timing and unreviewed status. If the optional text
+   model selected a highlight, its quote must resolve against the exact
+   passage. Repeat with an edited/forgotten input, relock during merge, and
+   kill/relaunch after publication but before cleanup. Expect no stale quote
+   or resurrection. Repeat with model missing, blocked notifications, low
+   battery, saver and thermal pressure. **Process now** still requires unlock.
+5. To independently test the platform key boundary, install the test APK
+   and run the command below **three times**: `prepare` unlocked,
+   `locked` behind the real secure keyguard, and `unlock` after
+   authenticating. Substitute the phase name for `PHASE`. The locked phase
+   attempts the real Keystore private operation as well as public encryption;
+   the last phase must decrypt the exact synthetic bytes and cleans its keys.
+
+   `adb shell am instrument -w -e overnightKeyPhase PHASE -e class dev.phonememory.OvernightDeviceProbe dev.phonememory.test/androidx.test.runner.AndroidJUnitRunner`
+
+Android documents unlock-required-key caveats, particularly on Android 12–14
+after removal of a screen lock or use of some biometrics. Repeat with a strong
+credential if needed. If the device cannot enforce the separation, do **not**
+qualify it or disable the vault's unlock requirement. The deliberate tradeoff
+is that a worker-equivalent compromise after first unlock can read remaining
+pending audio, but not the saved journal or closed results while locked.
 
 ## Matched power protocol
 
@@ -121,7 +180,7 @@ apps, personal recordings or content-bearing logs are needed.
 | Idle | App installed, mic off, screen locked; no USB power. | Elapsed hours, start/end charge, % and temperature. |
 | Mic only | **Diagnostics: mic-only baseline**, confirm consent, lock for the same interval, Stop. This reads/discards the same mono input without VAD or audio writes. | Same counters, frame-derived capture hours. |
 | Capture + gate + writes | **Start listening**, replay the same mix, lock, Stop without processing. | Same counters, retained speech minutes, pending bytes/chunks, interruptions and missed speech. |
-| Charging throughput | Begin with the same known pending audio, plug in, unlock, keep saver off. Let normal jobs drain. | Audio minutes completed per elapsed hour, peak PSS, temperature/thermal pauses, remaining bytes and failures. Net charging percentage is **not** an energy estimate. |
+| Charging throughput | First-unlock once, relock with the same known pending audio, plug in and keep saver off. Let normal jobs drain before morning unlock. | Audio minutes sealed per elapsed hour, peak PSS, thermal pauses, remaining bytes and failures. Time the unlock merge separately. Net charging percentage is **not** an energy estimate. |
 
 Use **View local diagnostics** and the session details after Stop. Charge
 counter units are µAh (`BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER`);
