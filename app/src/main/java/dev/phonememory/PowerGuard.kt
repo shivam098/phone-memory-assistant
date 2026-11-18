@@ -26,7 +26,9 @@ class PowerGuard(private val context: Context) {
         power.currentThermalStatus < PowerManager.THERMAL_STATUS_MODERATE &&
         context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
             ?.getBooleanExtra(BatteryManager.EXTRA_BATTERY_LOW, true) == false &&
-        !context.getSystemService(KeyguardManager::class.java).isDeviceLocked && (!chargingOnly || battery.isCharging)
+        context.getSystemService(android.os.UserManager::class.java).isUserUnlocked &&
+        (if (chargingOnly) battery.isCharging && context.getSystemService(KeyguardManager::class.java).isDeviceSecure
+        else !context.getSystemService(KeyguardManager::class.java).isDeviceLocked)
 }
 
 class SileroGate(context: Context) : SpeechGate {

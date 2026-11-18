@@ -12,13 +12,27 @@ data class ListeningStatus(val token: UUID? = null, val source: UUID? = null, va
                            val version: Long = 0, val baseline: Boolean = false)
 
 class MemoryApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        // A live process can merge promptly on unlock. WorkManager covers a cold process;
+        // the foreground reader also merges before presenting its first snapshot.
+        androidx.core.content.ContextCompat.registerReceiver(this, object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: Intent) {
+                if (journal.awaitingUnlock > 0) OvernightMerge.enqueue(this@MemoryApp, "user-present")
+            }
+        }, android.content.IntentFilter(Intent.ACTION_USER_PRESENT), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+    internal val nightKeys by lazy { OvernightKeys(this) }
+    val isLocked get() = getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked
     val journal by lazy {
         val wrapper = VaultKey("phone-memory-v2", true)
-        Journal(File(noBackupFilesDir, "journal-v2"), { create ->
-            if (getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked)
-                throw LocalProblem("Unlock the phone to open the notebook.")
-            wrapper.get(create)
-        })
+        val guard = {
+            val lock = getSystemService(android.app.KeyguardManager::class.java)
+            if (lock.isDeviceLocked || !lock.isDeviceSecure)
+                throw LocalProblem("Use a secure screen lock and unlock the phone to open the notebook.")
+        }
+        Journal(File(noBackupFilesDir, "journal-v2"), { create -> guard(); wrapper.get(create) },
+            VaultKey("phone-memory-pending-v1", false)::get, ::syncDirectory, guardJournalRead = guard)
     }
     val legacy by lazy {
         val legacyKey = VaultKey()
@@ -37,6 +51,10 @@ class MemoryApp : Application() {
     fun processingFailure() {
         getSharedPreferences("work-status", MODE_PRIVATE).edit().putBoolean("charging-failed", true).apply()
         synchronized(this) { changed.value++ }
+    }
+    fun overnightNotice(flag: String, signal: Boolean = true) {
+        getSharedPreferences("work-status", MODE_PRIVATE).edit().putBoolean("night-$flag", true).apply()
+        if (signal) synchronized(this) { changed.value++ }
     }
     private val state = MutableStateFlow(ListeningStatus())
     val listening = state.asStateFlow()

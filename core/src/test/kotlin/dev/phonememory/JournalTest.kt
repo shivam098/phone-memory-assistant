@@ -11,7 +11,8 @@ import javax.crypto.KeyGenerator
 class JournalTest {
     @get:Rule val tmp = TemporaryFolder()
     private val secret = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
-    private fun store(root: File) = Journal(root, { secret })
+    private val pendingKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+    private fun store(root: File) = Journal(root, { secret }, { pendingKey }, {})
     private fun Journal.Writer.frame(start: Long = 0, now: Long = 1200) =
         append(start, start + 3200, 3200, "test codec bytes (not real audio)".toByteArray(), now)
 
@@ -50,7 +51,7 @@ class JournalTest {
 
     @Test fun lockBlocksNewReadsButWriterSealsUntilQuotaWithoutReopeningMaster() {
         var locked = false
-        val j = Journal(tmp.newFolder(), { if (locked) throw IllegalStateException("locked"); secret }, maxChunks = 1)
+        val j = Journal(tmp.newFolder(), { if (locked) throw IllegalStateException("locked"); secret }, { pendingKey }, {}, maxChunks = 1)
         j.open()
         val writer = j.begin(null, 1000)
         locked = true
@@ -68,7 +69,7 @@ class JournalTest {
         val dir = tmp.newFolder()
         val j = store(dir).apply { open() }
         val w = j.begin(null, 1000)
-        val header = File(dir, "${w.id}/coverage")
+        val header = File(dir, "${w.id}/capture.state")
         val prior = header.readBytes()
         w.frame()
         header.writeBytes(prior) // process lost after chunk rename, before coverage rename
@@ -112,13 +113,13 @@ class JournalTest {
         val w = j.begin(null, 1000)
         w.frame(); w.frame(3200, 1400); w.end(EndReason.ROUTE, 1400, 6400)
         val first = j.input(w.id, 1)!!
-        val ciphertext = File(dir, "${w.id}/1.audio").readBytes()
+        val ciphertext = File(dir, "${w.id}/1.chunk").readBytes()
         assertFalse(ciphertext.toString(Charsets.UTF_8).contains("test codec"))
         j.publish(first, "one", "test")
-        File(dir, "${w.id}/1.audio").writeBytes(ciphertext)
+        File(dir, "${w.id}/1.chunk").writeBytes(ciphertext)
         val next = store(dir)
         assertEquals(1, next.open().single().segments.size)
-        assertFalse(File(dir, "${w.id}/1.audio").exists())
+        assertFalse(File(dir, "${w.id}/1.chunk").exists())
         val stale = next.input(w.id, 2)!!
         next.forget(w.id)
         assertThrows(LocalProblem::class.java) { next.publish(stale, "late", "test") }

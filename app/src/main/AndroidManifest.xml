@@ -9,6 +9,8 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <application
         android:name=".MemoryApp"
+        android:directBootAware="false"
+        android:defaultToDeviceProtectedStorage="false"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"

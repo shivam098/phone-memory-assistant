@@ -17,6 +17,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.lifecycle.ViewModelProvider
 import java.util.UUID
@@ -39,6 +42,13 @@ private class LocalDocuments(private val mime: String, private val multiple: Boo
 }
 
 class MainActivity : ComponentActivity() {
+    private var showNotebook by mutableStateOf(false)
+    private val screenOff = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            showNotebook = false
+            book.hideLockedNotebook()
+        }
+    }
     private val book by lazy { ViewModelProvider(this)[Notebook::class.java] }
     private val note = registerForActivityResult(LocalDocuments("text/plain")) { uris ->
         uris.singleOrNull()?.let(book::importText) ?: book.notice("No text file selected.")
@@ -60,6 +70,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        androidx.core.content.ContextCompat.registerReceiver(this, screenOff, android.content.IntentFilter(Intent.ACTION_SCREEN_OFF),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         ListeningService.createChannel(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
@@ -69,7 +81,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             // Drafts, queries, selections and excerpts must not enter Android's saved-state Bundle.
             CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
-                NotebookScreen(book, { note.launch(Unit) }, ::startMic) { model ->
+                if (showNotebook) NotebookScreen(book, { note.launch(Unit) }, ::startMic) { model ->
                     if (model == Model.SPEECH) speech.launch(Unit) else text.launch(Unit)
                 }
             }
@@ -94,8 +106,13 @@ class MainActivity : ComponentActivity() {
             catch (_: RuntimeException) { book.notice("Android did not allow the microphone service to start.") }
         }
     }
-    override fun onResume() { super.onResume(); book.activate() }
-    override fun onPause() { book.background(); super.onPause() }
+    override fun onResume() {
+        super.onResume()
+        showNotebook = !getSystemService(KeyguardManager::class.java).isDeviceLocked
+        book.activate()
+    }
+    override fun onDestroy() { unregisterReceiver(screenOff); super.onDestroy() }
+    override fun onPause() { showNotebook = false; book.background(); super.onPause() }
     override fun onStop() {
         if (getSystemService(KeyguardManager::class.java).isDeviceLocked ||
             !getSystemService(PowerManager::class.java).isInteractive) book.hideLockedNotebook()

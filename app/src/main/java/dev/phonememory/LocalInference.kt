@@ -108,4 +108,6 @@ class LocalInference(private val context: Context) {
             }
         }
     }
+
+    val highlightProducer get() = "MediaPipe/0.10.27 Qwen2.5 0.5B int8 ${catalog.getJSONObject("text").getString("revision")}"
 }

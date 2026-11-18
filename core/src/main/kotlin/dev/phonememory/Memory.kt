@@ -14,7 +14,7 @@ enum class Origin(val label: String) {
 enum class Provenance { TYPED, IMPORTED, LEGACY_REVIEWED, LOCAL_ASR, USER_REVIEWED, USER_CORRECTED }
 data class Segment(
     val id: UUID, val order: Long, val text: String, val provenance: Provenance,
-    val producer: String = "", val startMs: Long? = null, val endMs: Long? = null
+    val producer: String = "", val startMs: Long? = null, val endMs: Long? = null, val pick: PassagePick? = null
 )
 data class Source(
     val id: UUID, val createdAt: Long, val origin: Origin, val revision: Long, val segments: List<Segment>,

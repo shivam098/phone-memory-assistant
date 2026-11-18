@@ -41,6 +41,7 @@ class Notebook(private val app: Application) : AndroidViewModel(app) {
     private var refreshPending = false
     private var lastProcessed: UUID? = null
     fun backlogForDisplay() = journal.backlog()
+    val awaitingUnlock get() = journal.awaitingUnlock
     val listening = host.listening
     var ready by mutableStateOf(false); private set
     var sources by mutableStateOf(emptyList<Source>()); private set
@@ -55,7 +56,14 @@ class Notebook(private val app: Application) : AndroidViewModel(app) {
     var highlight by mutableStateOf<Excerpt?>(null); private set
 
     fun open() = launch(Work.OPEN, "Could not unlock or migrate local storage. Nothing was reset.") {
-        sources = withContext(Dispatchers.IO) { journal.open(host.legacy) }
+        sources = withContext(Dispatchers.IO) {
+            val initial = journal.open(host.legacy)
+            try { host.nightKeys.prepare(allowNewKey = journal.awaitingUnlock == 0) }
+            catch (_: java.security.GeneralSecurityException) { host.overnightNotice("key-failed", false) }
+            catch (_: java.security.ProviderException) { host.overnightNotice("key-failed", false) }
+            catch (_: LocalProblem) { host.overnightNotice("key-failed", false) }
+            if (journal.awaitingUnlock > 0) { mergeForDisplay(); journal.open() } else initial
+        }
         pending = withContext(Dispatchers.IO) { journal.backlog() }
         installed = modelLock.withLock {
             withContext(Dispatchers.IO) {
@@ -69,9 +77,11 @@ class Notebook(private val app: Application) : AndroidViewModel(app) {
             notice("Previous local processing was interrupted. Check the source and pending audio.")
             markProcessing(false)
         }
+        readNightNotices()
     }
 
     fun activate() {
+        if (host.isLocked) { hideLockedNotebook(); return }
         visible = true
         if (!ready) open() else refresh()
     }
@@ -82,9 +92,25 @@ class Notebook(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun hideLockedNotebook() {
-        if (work == null && !visible) {
-            sources = emptyList(); highlight = null; selected = null; ready = false
-            discardDraft()
+        visible = false
+        fence.advance(); job?.cancel(); work = null
+        sources = emptyList(); highlight = null; selected = null; ready = false
+        discardDraft()
+    }
+    private fun mergeForDisplay(): MergeResult = try { OvernightMerge.mergeReady(host) }
+    catch (_: java.security.GeneralSecurityException) { host.overnightNotice("merge-failed", false); MergeResult() }
+    catch (_: java.io.IOException) { host.overnightNotice("merge-failed", false); MergeResult() }
+    catch (_: LocalProblem) { host.overnightNotice("merge-failed", false); MergeResult() }
+
+    private fun readNightNotices() {
+        val notices = mapOf("merged" to "Sealed passages have been verified and are now available.", "stale" to "Discarded a sealed result because its source changed.",
+            "no-highlight" to "The optional overnight highlight was unavailable.",
+            "key-failed" to "Overnight keys unavailable. Unlock with a secure credential; no keys were replaced.",
+            "merge-failed" to "Sealed passages could not be opened. Existing memories were not reset.")
+        val flags = notices.keys.filter { prefs.getBoolean("night-$it", false) }
+        if (flags.isNotEmpty()) {
+            notice(flags.joinToString(" ") { notices.getValue(it) })
+            prefs.edit().apply { flags.forEach { remove("night-$it") } }.apply()
         }
     }
 
@@ -92,7 +118,8 @@ class Notebook(private val app: Application) : AndroidViewModel(app) {
         if (!ready || !visible) return
         if (work != null) { refreshPending = true; return }
         launch(Work.REFRESH, "Could not refresh the source or pending audio.") {
-            for (id in host.takeChanges() + setOfNotNull(listening.value.source, lastProcessed)) {
+            val merged = withContext(Dispatchers.IO) { mergeForDisplay() }
+            for (id in host.takeChanges() + merged.sources + setOfNotNull(listening.value.source, lastProcessed)) {
                 withContext(Dispatchers.IO) { journal.sourceIfPresent(id) }?.let(::replace)
             }
             pending = withContext(Dispatchers.IO) { journal.backlog() }
@@ -101,6 +128,7 @@ class Notebook(private val app: Application) : AndroidViewModel(app) {
                 notice("Charging transcription failed or returned no text. Pending audio can be retried or forgotten.")
                 prefs.edit().remove("charging-failed").apply()
             }
+            readNightNotices()
         }
     }
     private fun replace(src: Source) {
@@ -187,7 +215,7 @@ class Notebook(private val app: Application) : AndroidViewModel(app) {
                 inference.openSpeech(hint).use { engine ->
                     var completed = 0
                     for (item in eligible) {
-                        if (processChunk(host, engine, item, false)) completed++
+                        if (processChunk(host, engine, item)) completed++
                         val backlog = journal.backlog()
                         withContext(Dispatchers.Main) { pending = backlog; notice("$completed passage(s) transcribed locally.") }
                     }
