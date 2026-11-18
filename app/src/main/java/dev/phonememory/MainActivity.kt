@@ -19,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.lifecycle.ViewModelProvider
+import java.util.UUID
 
 private class LocalDocuments(private val mime: String, private val multiple: Boolean = false) :
     ActivityResultContract<Unit, List<Uri>>() {
@@ -49,12 +50,17 @@ class MainActivity : ComponentActivity() {
         if (it.isNotEmpty()) book.install(Model.TEXT, it) else book.notice("No text model selected.")
     }
     private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        book.notice(if (granted) "Microphone allowed. Tap Start recording when everyone is ready."
+        book.notice(if (granted) "Microphone allowed. Tap Start listening when everyone is ready."
             else "Microphone not allowed. Notes still work; you can change mic access in app settings.")
+    }
+    private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        book.notice(if (granted) "Controls enabled. Tap Start or Resume when ready."
+            else "Listening is off. Enable notifications in Android settings for visible Pause and Stop controls.")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ListeningService.createChannel(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         if (Build.VERSION.SDK_INT >= 30) {
@@ -70,19 +76,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startMic() {
+    private fun startMic(resume: UUID?, baseline: Boolean) {
         if (!hasWindowFocus() || getSystemService(KeyguardManager::class.java).isKeyguardLocked ||
             !getSystemService(PowerManager::class.java).isInteractive) {
-            book.notice("Unlock the phone and keep this screen open to record.")
+            book.notice("Unlock and tap Start or Resume from this screen.")
         } else if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permission.launch(Manifest.permission.RECORD_AUDIO)
-        } else book.record()
+        } else if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (!ListeningService.controlsAvailable(this)) {
+            book.notice("Enable the Listening controls notification channel before starting.")
+        } else {
+            val reason = PowerGuard(this).captureReason()
+            if (reason != null) { book.notice(reason.label); return }
+            try { (application as MemoryApp).startFromTap(resume, baseline) }
+            catch (_: LocalProblem) { book.notice("Listening is already starting or active.") }
+            catch (_: RuntimeException) { book.notice("Android did not allow the microphone service to start.") }
+        }
     }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus && book.work == Work.RECORD) book.cancelLocal()
+    override fun onResume() { super.onResume(); book.activate() }
+    override fun onPause() { book.background(); super.onPause() }
+    override fun onStop() {
+        if (getSystemService(KeyguardManager::class.java).isDeviceLocked ||
+            !getSystemService(PowerManager::class.java).isInteractive) book.hideLockedNotebook()
+        super.onStop()
     }
-
-    override fun onPause() { book.cancelLocal(); super.onPause() }
 }

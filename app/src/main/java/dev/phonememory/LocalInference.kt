@@ -39,7 +39,7 @@ class LocalInference(private val context: Context) {
         if (!it.installed()) throw LocalProblem("Install the local ${model.title} files first.")
     }
 
-    fun transcribe(pcm: FloatArray, hint: SpeechHint): String {
+    fun openSpeech(hint: SpeechHint): ChunkDecoder {
         val folder = requireModel(Model.SPEECH).directory
         val config = OfflineRecognizerConfig(
             featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
@@ -55,16 +55,25 @@ class LocalInference(private val context: Context) {
             )
         )
         val recognizer = OfflineRecognizer(config = config)
-        try {
-            val stream = recognizer.createStream()
-            try {
-                stream.acceptWaveform(pcm, SAMPLE_RATE)
-                recognizer.decode(stream)
-                return recognizer.getResult(stream).text.trim().ifBlank {
-                    throw LocalProblem("No transcript returned. Try a shorter, clearer recording.")
-                }
-            } finally { stream.release() }
-        } finally { recognizer.release() }
+        return object : ChunkDecoder {
+            override val producer = "sherpa-onnx/1.12.14 Whisper Base int8 ${catalog.getJSONObject("speech").getString("revision")} (${hint.label})"
+            override fun decode(pcm: FloatArray): String {
+                val stream = recognizer.createStream()
+                try {
+                    stream.acceptWaveform(pcm, SAMPLE_RATE)
+                    recognizer.decode(stream)
+                    return recognizer.getResult(stream).text.trim().ifBlank {
+                        throw LocalProblem("No transcript returned. Pending audio was kept; retry or forget the session.")
+                    }
+                } finally { stream.release() }
+            }
+            override fun close() = recognizer.release()
+        }
+    }
+
+    interface ChunkDecoder : AutoCloseable {
+        val producer: String
+        fun decode(pcm: FloatArray): String
     }
 
     fun highlight(source: Source): Excerpt? {

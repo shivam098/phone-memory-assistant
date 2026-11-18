@@ -35,19 +35,18 @@ class DeviceSmoke {
             KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
         }
 
-        /** Deliberately opt in after installing the pinned model on a test handset. No real sources. */
-        @Test fun installedTextModelCanSelectGroundedEvidence() {
-            assumeTrue(InstrumentationRegistry.getArguments().getString("modelSmoke") == "true")
-            val source = Source(UUID.randomUUID(), 0, Origin.NOTE,
-                "The box is blue.\nकल की meeting शुक्रवार को है। Bring the notebook.")
-            val start = android.os.SystemClock.elapsedRealtime()
-            val result = LocalInference(context).highlight(source)
-            val ms = android.os.SystemClock.elapsedRealtime() - start
-            InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply {
-                putString("cold_highlight_ms", ms.toString())
-            })
-            assertNotNull("The engine did not return a valid passage number", result)
-            assertTrue(candidates(source).contains(result))
-        }
+    }
+
+    @Test fun installedTextModelCanSelectGroundedEvidence() {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("modelSmoke") == "true")
+        val source = Source(UUID.randomUUID(), 0, Origin.NOTE,
+            "The box is blue.\nकल की meeting शुक्रवार को है। Bring the notebook.")
+        val result = LocalInference(context).highlight(source)
+        assertNotNull("The engine did not return a valid passage number", result)
+        assertTrue(candidates(source).contains(result))
+    }
+
+    @Test fun bundledSileroLoadsAndRejectsAnEmptyWindow() {
+        SileroGate(context).use { assertFalse(it.speech(ShortArray(512), 512)) }
     }
 }

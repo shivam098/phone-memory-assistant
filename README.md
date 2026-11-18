@@ -17,7 +17,8 @@ misrecognized Hindi and code-switched clips.
    mode; no sign-in, API key, assistant service or microphone grant is needed for notes.
 2. Type a note, or tap **Import UTF-8 text** and choose one local plain-text
    file. Review the draft, then **Save locally**. Imports are copies, not live
-   connections. This milestone allows 100 sources, up to 16 KiB each.
+   connections. This milestone allows 100 sources; a single note, import or
+   transcript passage is limited to 16 KiB. A session can have many passages.
 3. In **Recall**, enter words from a line. Each result quotes the saved source
    and gives its reference and line number. Tap to read it. This is literal
    Unicode text search, not a generated answer or cross-script translation.
@@ -44,16 +45,33 @@ trust provider filenames or accept an English-only substitute. Allow room for
 the picker copies, the app's own copies (~675 MiB combined) and runtime cache.
 The picker copies can be removed after successful installation.
 
-- **Speech:** get everyone's permission, choose a language hint if desired,
-  then tap **Start recording**. Granting mic permission does **not** start it;
-  tap again. The mic stays on only on the visible recording screen, for at most
-  25 seconds. Stop to transcribe. Edit the unverified draft before saving;
-  no audio file is written. Losing focus during capture discards the clip.
+- **Listening:** get everyone's permission, then tap **Start listening** and
+  confirm. Granting Android permissions never starts the mic. The session can
+  continue through screen lock and switching apps with notification controls.
+  Pause/Stop from the notification. Opening the app, unlocking, charging,
+  rebooting and service recreation never resume capture. The app declines to
+  start if the controls are blocked. No ASR model is required to capture.
+- **Speech:** a loudness gate followed by bundled, MIT-licensed Silero VAD
+  selects speech and short padding. Lossless FLAC chunks accumulate in a
+  bounded encrypted queue. Battery saver or the configurable low-battery
+  threshold (default 15%) pauses capture. **These are guards, not a battery-life
+  guarantee.** See pending duration/bytes before relying on Recall.
+- **Transcription:** normal jobs run on external power with battery not low,
+  saver off, safe thermal status and the notebook unlocked. For an urgent
+  query, open a session and **Process now** for a chosen recent time window.
+  Local ASR passages are stored as **unreviewed**, with model provenance and
+  coarse chunk timing. Review/correcting is optional. Successful publication
+  deletes the corresponding raw audio. Failure or cancellation leaves
+  unfinished audio queued. There is no cloud fallback.
 - **Text:** open a saved source and tap **Find a highlight**. A local text
   model selects one of up to six short passages. Only a valid selection is
   displayed, as a verbatim excerpt with a citation. This is **extractive**:
   no free-form advice, generated facts or actions. Missing models, bad
   imports, interrupted work and unsupported output do not produce fake results.
+
+M1 notes/imports/reviewed transcripts migrate locally with their IDs and
+timestamps on first unlock. Upgrade in place using the same signing key;
+uninstalling first deletes the notebook. Use synthetic data for this build.
 
 See the [model evidence and handset test guide](docs/handset-check.md) for
 licenses, limitations and the tests needed before using this for real memories.
@@ -72,6 +90,7 @@ Use `gradlew.bat` on Windows. The installable app is
 `app/build/outputs/apk/debug/app-debug.apk` (not the instrumentation APK).
 `:core:test` can run without an Android SDK. The debug build is for synthetic
 test data, not a signed production distribution.
+
 ## Product direction
 
 Help people recall conversations, notes and information they choose to connect,
