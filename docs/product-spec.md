@@ -1,6 +1,6 @@
 # Phone Memory Assistant: cross-platform product specification
 
-**Spec 0.3 · First-release contract, not release notes.** Help someone answer
+**Spec 0.4 · First-release contract, not release notes.** Help someone answer
 “What did we decide?” from material they chose to save, see the exact words behind
 the answer, and correct or forget them. Use devices people already own.
 
@@ -22,6 +22,8 @@ contract. It can select a verbatim source highlight or abstain. In a desktop
 ASR smoke test, one English sentence was correct; the Hindi and code-switched
 transcripts were incorrect. There is no native-device validation yet, including
 on the OnePlus 8T. All-day capture and R1 language/insight quality remain unverified.
+The Android M2 prototype only processed queued audio while unlocked; that does
+not meet the [overnight transcription requirement](#overnight-transcription-while-locked).
 
 Port guides: [Android](#android) · [iOS](#ios) · [macOS](#macos) ·
 [Windows](#windows). All four use the [same release checklist](#release-and-port-conformance-checklist).
@@ -76,14 +78,17 @@ a transcript, show a simulated recording, or route a failed local job to the net
 
 **R1 separates recording from inference.** An explicitly started session can
 keep capturing on battery; by default ASR and new insights run only on external
-power, with saver off, battery not low, safe thermal status and protected data
-accessible. Unplugging pauses automatic work. A thermal warning pauses any
-inference job at a safe checkpoint, including **Process now**. Plugging in may
+power, with saver off, battery not low and safe thermal status. After the first
+unlock since restart, ASR processes queued audio **while the phone is locked**;
+jobs that need to read saved memories wait for unlock. Unplugging pauses
+automatic work. A thermal warning pauses any inference job at a safe checkpoint,
+including **Process now**. Plugging in may
 make queued work eligible; it never starts the mic.
 
 | What the user sees | Required behavior |
 | --- | --- |
-| **Waiting for charge** | Search and show existing transcripts, citations and saved insights on battery. State coverage for the requested interval, e.g. “3 h 20 min of captured audio waiting for charge.” Pending audio is not evidence that nothing was said. Distinguish queued speech, gated-out time and interruption gaps. |
+| **Waiting for charge** | While unlocked, search existing transcripts, citations and saved insights on battery. State coverage for the requested interval, e.g. “3 h 20 min of captured audio waiting for charge.” Pending audio is not evidence that nothing was said. Distinguish queued speech, gated-out time and interruption gaps. |
+| **Transcribed overnight; available after unlock** | Show this content-free status only for work durably sealed while locked. It is not yet searchable. Never show transcript text, a source name or a preview on the lock screen; recall can cite the result only after the unlock-time merge succeeds. |
 | **Process now** | For an urgent question, let the user select a time window and explicitly run its ASR/insight work on battery. Show progress and Cancel. This overrides only the external-power condition, not low-battery, saver, thermal, unlock or consent checks. Cancellation leaves unfinished chunks queued; it does not stop capture or grant a lasting override. |
 | **Paused to protect battery** | If OS battery saver activates or charge reaches the low-battery threshold, release the mic, seal the prefix and show a content-free notification with tap-to-resume. Reject Start/Resume while the guard is active. Clearing it or connecting power does not resume a paused recording. |
 
@@ -105,9 +110,9 @@ Keep the screen-off capture path small:
   been measured across all three language modes.
 - **Backlog:** Show pending duration and bytes. Warn before the queue or disk
   fills, then pause capture with a reason; never overwrite old speech or
-  silently restart. Commit transcripts locally with ASR provenance and
-  **unreviewed** status. Delete working audio after commit unless the user chose
-  to keep it. Forget also removes queued audio and invalidates running jobs.
+  silently restart. Save transcripts locally with ASR provenance and
+  **unreviewed** status. Delete working audio once the result is durably sealed;
+  retained audio belongs with saved memories, not in the queue.
 
 **Later candidates, off by default:** User-scheduled quiet hours could pause a
 session but would still require an explicit Resume. Duty-cycled listening
@@ -173,7 +178,7 @@ script. Normalized spellings or transliterations are search aids, not quotations
 | --- | --- |
 | Input and capture | `pickLocal()` yields selected bytes/type/origin or cancel; `start(input, consent)` yields a session or reason. Emit frames, route/permission changes, interruptions and end. Expose pause/resume/stop/discard. Do not let capture code invoke a connector. |
 | Local models | `probe(task, languages)` checks installed assets, integrity, architecture and resources for **ASR and insights separately**. `transcribe(chunk, cancel)` yields time-linked, unreviewed segments; `derive(question, evidence, cancel)` yields supported claims or abstains. No network backend. |
-| Protected store and retrieval | `save`, `timeline`, `search`, `resolve(span)`, `correct` and `forget` operate on local records. Commit job output atomically only if **all** input revisions are current and none was forgotten. Apply the same check before displaying a late result. |
+| Protected store and retrieval | `save`, `timeline`, `search`, `resolve(span)`, `correct` and `forget` require the unlocked vault. `stageSealed(job, output)` can write while locked but cannot read the journal. `mergeOnUnlock` publishes output atomically only if **all** input revisions are current and none was forgotten. Recheck before displaying a late result. |
 | Optional external I/O | Separate `read(scope)`, `processApproved(payload, destination)` and `performApproved(action)` entry points. Bind approval to the reviewed bytes/fields, revisions and target; recheck at dispatch. The offline pipeline must run with **none** of these adapters installed. |
 
 Return explicit `denied`, `cancelled`, `locked`, `model unavailable`, `no space`,
@@ -181,30 +186,62 @@ Return explicit `denied`, `cancelled`, `locked`, `model unavailable`, `no space`
 a successful search of the stated coverage, not another name for a failed
 search or audio that has not been processed.
 
+### Overnight transcription while locked
+
+Use **two protection classes with separate keys**. Locking a phone after its
+first unlock is not the same as restarting it and leaving it locked. Require a
+secure screen lock; if a platform cannot enforce the separation, report the
+capability unavailable rather than lowering the journal's protection.
+
+| Class | Before first unlock after restart | After first unlock, then relocked |
+| --- | --- | --- |
+| **Pending audio** — encrypted speech chunks, their processing keys and minimal job metadata | Neither the audio nor the keys needed to read it are available. No transcription. | An eligible local charging job can read its assigned chunks, including after process death. It needs no saved-memory key and never opens the mic. Delete each pending chunk and its wrapped content key after its result is durably sealed. |
+| **Saved memories** — segments, transcripts, insights, journal, indexes and any audio the user chose to keep | Unreadable. | Still unreadable. A worker can seal **new** output using the vault's public key; the private decryption key, existing journal and index are unavailable. Close readers and clear decrypted caches and vault keys on lock. |
+
+1. **Seal, don't publish.** Keep plaintext ASR output only in working memory.
+   Encrypt each result with a fresh authenticated-encryption key, wrap that
+   key to the vault public key provisioned while unlocked, then clear it.
+   Bind the envelope to its job, source revision and chunk ID. Close and durably
+   stage it before retiring the input; on failure leave the audio queued.
+   If retention was chosen, also seal the audio for the vault before deleting
+   the queue copy. No plaintext checkpoints or index updates while locked.
+2. **Merge on the next unlock.** Verify the envelope and expected job, then
+   in one transaction recheck source revisions, cancellations and Forget
+   markers before adding to the journal and index. Drop stale results rather
+   than recreating a source. Record accepted chunk IDs so a crash or replay
+   cannot publish twice. If the device relocks, close the vault and leave
+   unmerged envelopes sealed.
+
+**Disclose the tradeoff before recording:** If a powered-on phone is stolen
+after its first unlock and someone bypasses the screen lock to gain the
+background worker's access, they could read audio still awaiting transcription.
+That access does **not** decrypt saved memories while the OS still protects the
+vault key. It is not a guarantee against someone who can actually authenticate
+as the user or compromise the OS or keystore.
+
 ### Storage, correction and forgetting
 
 - **At rest:** Encrypt recordings, source text, metadata, indexes, derived
   outputs and temporary files (including database journals and model input
-  caches). Protect the data-encryption key with native user/device key storage.
+  caches). Protect each class's keys with native user/device key storage.
   Fail closed if protected storage is unavailable. No content
   in telemetry, logs, crash reports, notifications or system search indexes.
   Exclude the store, staging files and key material from default backup, sync
   and unintended device transfer. A sandbox or disk encryption alone is not enough.
-- **Active capture while locked:** Unwrap a per-session data key at explicit
-  session start; persist only its wrapped form for later authorized processing.
-  The recorder holds the unwrapped key only in memory while capturing. After
-  lock it may **append only** authenticated, encrypted chunks to that session;
-  it may not read the vault, open other sources or expose transcripts. Release
-  the capture key on pause, interruption or stop. If Resume needs an unlock to
-  regain the key, request it; unlocking by itself never starts the mic.
+- **Active capture while locked:** The recorder may only append encrypted chunks
+  to its user-started session. Wrap chunk keys under the pending-audio class;
+  hold the unwrapped session key only in memory during capture and release it
+  on pause, interruption or stop. The separate ASR worker can read sealed pending
+  chunks, not the journal. Unlocking alone never starts or resumes recording.
 - **Correct:** Publish a new revision and immediately invalidate old search
   hits, citations, insights, displayed/cached answers and unsent actions depending
   on the old one. Re-index/recompute from current sources. Never point an old
   citation at a different sentence merely because its offsets still fit.
 - **Forget:** In one durable transaction, make the source unreadable, mark its
   origin suppressed and invalidate all dependent work. Cancel jobs, remove raw
-  audio/text, segments, postings, derived results, drafts and caches. Recompute
-  multi-source outputs using only survivors. Finish interrupted cleanup on
+  audio/text, pending keys, staged envelopes, segments, postings, derived results,
+  drafts and caches. Recompute multi-source outputs using only survivors.
+  Finish interrupted cleanup on
   restart before serving results; do not promise physical overwrite of flash.
 - **Prevent resurrection:** Match a minimal local keyed identifier of stable
   origin and, for files, a keyed fingerprint of the original bytes. Check these
@@ -241,8 +278,21 @@ listing or available accelerator is not proof of offline support.
   Keep inference out of the microphone service. Respect [foreground service
   type timeouts](https://developer.android.com/develop/background-work/services/fgs/timeout)
   for the target OS; the `mediaProcessing` time limit is not a microphone timer.
-- Check the packaged ABI, local model load and available memory. Use app-private,
-  no-backup storage and an Android Keystore-protected wrapping key. Set and test
+- Check the packaged ABI, local model load and available memory. Store pending
+  chunks and their wrapped keys in app-private [credential-encrypted storage](https://developer.android.com/privacy-and-security/direct-boot),
+  never device-encrypted Direct Boot storage. This protects the wrapped chunk
+  keys until first unlock; a Keystore alias alone does not establish that gate.
+  Use a separate queue wrapping key and check `UserManager.isUserUnlocked()`,
+  not a blanket `isDeviceLocked` veto on ASR. Gate vault **decryption** on
+  current unlock.
+- Android's [`setUnlockedDeviceRequired(true)`](https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec.Builder#setUnlockedDeviceRequired(boolean))
+  does not restrict public-key operations: the worker can wrap a result key
+  while the vault private key cannot decrypt. On Android 11 and lower, the
+  flag also did not restrict symmetric **encryption or verification**; that
+  exception is not permission to decrypt. The API also documents encrypting
+  with a software-generated key, importing it as unlock-required, then clearing
+  the software key. Test actual lock behavior on every supported OS version.
+  Use no-backup storage for both classes and staging; set and test
   [backup rules](https://developer.android.com/identity/data/autobackup) for both
   cloud backup and device-to-device transfer on supported OS/OEM combinations;
   do not rely on `allowBackup` alone.
@@ -261,18 +311,22 @@ listing or available accelerator is not proof of offline support.
   available. A call or headset loss interrupts; its end is not a Resume gesture.
 - Request a `BGProcessingTask` with [`requiresExternalPower`](https://developer.apple.com/documentation/backgroundtasks/bgprocessingtaskrequest/requiresexternalpower)
   set on its request. iOS chooses when to run it. Check charge level, Low Power
-  Mode, `ProcessInfo.thermalState` and protected-data access; checkpoint on
-  expiration. If the vault is locked, leave work queued rather than weakening
-  file protection. Run **Process now** as visible, cancellable foreground work.
-- Bundle or locally import model assets; check device memory and run both
-  tasks on device. For the active chunk writer only, open a protected file
-  before lock with [`completeUnlessOpen`](https://developer.apple.com/documentation/foundation/fileprotectiontype/completeunlessopen)
-  and append independently encrypted chunks. Close the writer when capture
-  ends. Keep other files under complete protection in private Application
-  Support; close them and release unrelated keys on lock. Use an unlocked-only,
-  non-synchronizing [device-only Keychain item](https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlockedthisdeviceonly)
-  to protect session keys. Apply [backup exclusion](https://developer.apple.com/documentation/foundation/urlresourcevalues/isexcludedfrombackup)
-  to the writer too; test backup/restore and migration.
+  Mode, `ProcessInfo.thermalState` and **pending-class** access; checkpoint on
+  expiration. A locked journal does not block eligible ASR. Run **Process now**
+  as visible, cancellable foreground work.
+- Bundle or locally import models and exercise both tasks on device. Use
+  [Complete Until First User Authentication](https://developer.apple.com/documentation/foundation/fileprotectiontype/completeuntilfirstuserauthentication)
+  (class C) for sealed pending audio and [AfterFirstUnlockThisDeviceOnly](https://developer.apple.com/documentation/security/ksecattraccessibleafterfirstunlockthisdeviceonly)
+  for its Keychain material. A restarted worker must be able to reopen pending
+  files on a relocked iPhone, not just keep one recording handle open.
+- Stage new sealed outputs with [Complete Unless Open](https://developer.apple.com/documentation/foundation/fileprotectiontype/completeunlessopen)
+  (class B, [ECDH-based file protection](https://support.apple.com/guide/security/data-protection-classes-secb010e978a/web)):
+  write while locked, then close; a closed output cannot reopen until unlock.
+  Keep the journal and index under Complete Protection (class A), and vault
+  keys [WhenUnlockedThisDeviceOnly](https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlockedthisdeviceonly).
+  Release **vault** keys/handles on lock without disabling the pending class.
+  Exclude both classes and staging from [backup](https://developer.apple.com/documentation/foundation/urlresourcevalues/isexcludedfrombackup)
+  and migration; do not synchronize either Keychain item.
 - Use a document picker or share extension for selected material only; protect
   and clean any extension staging area. A later share sheet or event editor is
   a reviewed handoff, not access to Messages or Mail history.
@@ -291,6 +345,8 @@ listing or available accelerator is not proof of offline support.
 - Package and load a local runtime for each claimed CPU architecture; verify
   any acceleration on that hardware. Keep encrypted files in non-synced,
   per-user Application Support with a non-synchronizing Keychain-protected key.
+  Separate after-login queue access from vault decryption gated on current
+  unlock or user presence; an ordinary login Keychain is not a screen-lock gate.
   Keep data out of iCloud Drive and Spotlight; configure and test backup
   exclusion, including Time Machine. Check migration separately from sync.
 - Use `NSOpenPanel` or deliberate drag-and-drop to import. A later save panel
@@ -317,6 +373,9 @@ listing or available accelerator is not proof of offline support.
   with user-scoped [DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata),
   not machine scope. Test profile redirection, backup/restore and a different
   Windows user; roaming profiles mean DPAPI is not a device-only guarantee.
+  DPAPI alone is also not a workstation-lock gate. Give the after-logon worker
+  only pending keys and the vault public key; verify a separate unlock-bound
+  private-key policy before claiming locked processing on Windows.
 - Use a file-open picker/dialog or explicit drop; use a reviewed save dialog or
   share target for export. Do not read another app's message database or capture
   call audio. Check the packaged or unpackaged distribution, not just a debug build.
@@ -370,11 +429,19 @@ a desktop or iOS build. Use synthetic or expressly consented fixtures only.
   and no frames in the gaps. Resume explicitly, then Stop; wake and boot must
   not start new audio. On desktop repeat with input contention and sleep/wake;
   expect a marked pause on lock if the OS hides the controls.
-- [ ] **Locked storage and backlog:** While locked, verify only the active
-  encrypted writer can append and that unrelated sources remain inaccessible.
-  Defer ASR to exercise the visible backlog limit; expect a warning and safe
-  pause, not lost audio. Drain it after unlock on external power: transcripts
-  persist unreviewed with provenance and working audio is removed unless retention was chosen.
+- [ ] **Overnight transcription:** Queue two synthetic clips and reboot on
+  external power. Before first unlock, neither pending audio nor saved memories
+  can be decrypted; ASR does not run. Unlock once, relock and allow a charging
+  job to run overnight. Verify the backlog drains **while locked**, even from a
+  fresh worker process, without opening the vault or mic. Pending audio/keys
+  are removed after durable staging; the worker cannot decrypt its closed
+  outputs, retained audio, historical entries or index. Status contains no text
+  from the clips. A run that only processes after morning unlock is not a pass.
+- [ ] **Unlock-time merge:** Hold the merge, unlock and edit or forget one
+  source. Release the merge, interrupt it and retry. Only the unchanged clip
+  becomes searchable and citable, exactly once, with ASR provenance and
+  unreviewed status; no stale sealed result resurfaces. Separately fill the
+  pending queue with power disconnected: warn and pause without losing audio.
 - [ ] **Battery and speech gate:** With the screen off and unplugged, capture a
   consented fixture; verify no automatic ASR/insights and that recall reports
   the backlog. Run **Process now** on one interval and cancel; other intervals
