@@ -13,7 +13,7 @@ import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Immutable records, no plaintext journal, search index or saved inference result. */
+/** M1 format. M2 reads and removes these records only after atomic migration. */
 class Vault(private val dir: File, private val key: (create: Boolean) -> SecretKey) {
     private fun records(): List<File> {
         if (!dir.isDirectory && !dir.mkdirs()) throw IOException("Vault unavailable")

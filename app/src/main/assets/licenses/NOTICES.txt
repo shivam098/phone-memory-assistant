@@ -15,3 +15,6 @@ OpenAI Whisper: MIT (Whisper-MIT.txt). Multilingual Base ONNX conversion:
 https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base
 Qwen2.5-0.5B-Instruct (Qwen / Alibaba Cloud): Apache License 2.0.
 LiteRT conversion: https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct
+
+Bundled Silero VAD v5.1.2: MIT (Silero-MIT.txt).
+https://github.com/snakers4/silero-vad/tree/6478567951ae5c9979ad7b234185b5515f4be7a1

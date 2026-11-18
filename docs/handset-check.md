@@ -1,108 +1,137 @@
-# First handset check
+# M2: handset acceptance and power measurements
 
-## What is actually in the APK
+**Status:** buildable Android test milestone. No Android device was attached
+for implementation. Passing JVM tests or compiling a device-test APK does
+not demonstrate a day of capture, handset FLAC support, or useful Hindi ASR.
+Use synthetic or explicitly consented inputs; don't collect private phone data.
 
-| Path | Runtime / candidate | Weights, not inferred RAM |
+## What dedicated recorders do differently
+
+| First-party source | What transfers to this app |
+|---|---|
+| [Plaud device comparison](https://www.plaud.ai/pages/plaud-device-comparison) | A record button, local storage and a charging-time transfer option separate capture from later work. Uploading while charging is not offline transcription. |
+| [NeoSapien Neo 1 FAQ](https://neosapien.ai/shop/ai-personal-assistant/) | Neo describes offline capture over Bluetooth and processing when the phone is online again. We use a queue too, but do not require connectivity or start automatically. |
+| [Omi firmware](https://github.com/BasedHardware/omi/blob/main/omi/firmware/readme.md) | The CV1 buffers encoded audio when disconnected. We use lossless speech chunks, not Opus; codec effects on code-switched ASR need a comparison before considering lossy encoding. |
+
+[Zhidkov et al.](https://doi.org/10.3390/asi1010008) measured a substantial
+cost for an open microphone that varied between phones. VAD avoids writing
+and transcribing long silences; it does **not** make an open microphone free.
+None of the above is a measurement of a OnePlus 8T.
+
+## What the APK does
+
+- One 16 kHz, mono, PCM16 `AudioRecord` with blocking reads. No app wake lock,
+  screen timer, location, network or audio effects. A short in-memory FIFO
+  decouples reads from inference and FLAC encoding; it does not silently drop
+  blocks on overload. The keep/discard decision is loudness then bundled
+  [Silero v5.1.2](https://github.com/snakers4/silero-vad/tree/v5.1.2) (MIT,
+  SHA-256 verified at build). The gate retains short pre/post padding. Noise
+  can be mistaken for speech and quiet speech can be missed.
+- Retained audio is packed at roughly one-minute boundaries, or on Stop/Pause,
+  as [lossless FLAC](https://developer.android.com/media/platform/supported-formats#audio-formats),
+  encrypted before any filesystem write. The global backlog is limited to
+  256 chunks / 64 MiB with space reserved for the next chunk and free-space
+  headroom. It is not a ring buffer: nothing is evicted to keep recording.
+- A user tap from a visible unlocked activity starts a typed
+  [microphone foreground service](https://developer.android.com/develop/background-work/services/fgs/service-types#microphone).
+  Denied/blocked notifications prevent starting. Losing visible controls,
+  permission, input, or battery eligibility interrupts. Pause seals the
+  prefix and records a gap; Stop ends the session. A stopped notification
+  opens the app; **Resume needs explicit confirmation**. No mic start on boot,
+  service recreation, unlock, charging, or opening a notification.
+- The [charging scheduler](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work)
+  uses ordinary, constrained WorkManager jobs (one source/chunk, no personal
+  text in job data). No expedited/long-running work or separate ASR foreground
+  service. Android 15's time-limited `mediaProcessing` FGS is not needed.
+  WorkManager contributes scheduler/wake, network-state and reboot rescheduling
+  permissions; these do **not** permit mic restart or Internet access. The
+  app doesn't request a [Doze/battery optimization exemption](https://developer.android.com/training/monitoring-device-state/doze-standby#support_for_other_use_cases).
+- The candidate ASR is [sherpa-onnx 1.12.14](https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.12.14)
+  (Apache-2.0) + [multilingual Whisper Base int8](https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/tree/bb53ee204431c90d314c1cc08d28d23e5b7927cc)
+  (OpenAI weights MIT; conversion repo has no separate card). Input is decoded
+  in at most 20-second ASR slices. The app publishes one unreviewed passage
+  for the complete chunk with producer/version and **chunk-level** bounds on
+  the capture timeline, not word alignment. Long silences can lie inside those
+  bounds. The optional [Qwen2.5 0.5B int8](https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/tree/49bfd323c25c9dae2118906e1f3ffd16e0729b13)
+  (Apache-2.0) selects a verbatim highlight or abstains.
+- Each source has a random AES-256 data key wrapped by an unlocked-device
+  Android Keystore key. While locked only the active writer retains its
+  session key. Files have random IVs and GCM authenticates their source and
+  record identity. Headers, gaps, audio, text and provenance are encrypted
+  under `noBackupFilesDir`; opaque directory IDs, file counts and sizes are
+  not hidden from a filesystem observer. M1 records are retired individually
+  **after** committing and verifying a matching v2 source. Atomic revision
+  publication precedes audio unlink; recovery finishes interrupted cleanup.
+  Search/quotes bind to source ID, exact revision, segment ID and half-open
+  Unicode-scalar range. Forget detaches the entire source directory before
+  cleanup; late workers cannot recreate it. It is not forensic flash erasure.
+
+## Before measuring battery
+
+1. Install the app and instrumentation APK on a dedicated, screen-lock-enabled
+   ARM64 Android 10+ handset. To test migration, first save **synthetic** M1
+   examples and install M2 over M1 (`adb install -r`, same signing key).
+   Check origins, original script, timestamps and IDs after restart. Never
+   uninstall a real notebook to work around signing or Keystore failures.
+2. With Wi-Fi off and airplane mode on, try missing, wrong and valid model
+   imports. `./gradlew :app:connectedDebugAndroidTest` exercises native
+   Keystore/permissions, bundled VAD and FLAC round trip (when a device is
+   connected). With the text model installed, run the opt-in grounding probe:
+   `adb shell am instrument -w -e modelSmoke true -e class dev.phonememory.DeviceSmoke dev.phonememory.test/androidx.test.runner.AndroidJUnitRunner`.
+3. Check that both the initial Start and every Resume require an explicit
+   tap/participant consent, and that permission grants alone do not start.
+   Lock/background with Pause and Stop accessible. Test actual OxygenOS
+   lock-screen privacy settings, blocked/dismissed notification, mic privacy
+   switch, permission revocation, call/VoIP, headset/Bluetooth removal and
+   competing recorders. If a lock screen hides controls and capture continues,
+   do **not** sign off that OS configuration.
+4. Pause and resume; check the gap and timestamps. Force-stop or kill mid-chunk
+   with already sealed chunks, relaunch after unlock, and confirm the mic stays
+   off. An abrupt kill cannot post a notification or persist its exact time:
+   recover from the last durable boundary, not the next launch time. In-RAM
+   speech since that boundary can be lost. Test screen-off idle/Doze and
+   OxygenOS background-kill settings without exempting the app.
+5. On battery, confirm pending seconds/bytes grow with speech but not silence.
+   Fill the queue with no ASR model; expect a visible warning then a pause,
+   not overwrite. Test low space, battery saver and the adjustable 15% guard;
+   no auto-resume when the condition clears. While charging but locked or
+   thermally constrained, pending audio stays queued. Unlock and check it
+   drains. Test loss of the constraints during a job, cancellation of Process
+   now, revision changes/Forget during processing, restart and backup/transfer
+   exclusion with synthetic data.
+6. Human-check soft and normal Hindi, English and mixed Hinglish with and
+   without background noise. Compare a consented reference with the speech
+   admitted by the gate; count missed utterances, clipped first/last words,
+   changed names/numbers and script switches. Then inspect unreviewed spans,
+   correction, quote invalidation and abstention. The earlier **desktop**
+   smoke reproduced one synthetic English sentence, but misrecognized Hindi
+   and mixed examples even with a Hindi hint. It is not a handset score.
+
+## Matched power protocol
+
+Use the **same test handset**, APK, model hashes, OS, RAM variant, brightness,
+audio route, airplane-mode settings and starting charge range. Use repeatable
+external synthetic playback at fixed distance/level, with known speech and
+silence durations. Use at least three equal-length repeats per unplugged arm
+(e.g. 60 minutes), allow cooling and vary arm order. No unrelated private
+apps, personal recordings or content-bearing logs are needed.
+
+| Arm | How to run | Record |
 |---|---|---|
-| Speech draft | [sherpa-onnx 1.12.14](https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.12.14), ARM64 CPU, greedy, two threads. [Whisper Base multilingual int8 ONNX](https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/tree/bb53ee204431c90d314c1cc08d28d23e5b7927cc), *transcribe*, not translate. Auto detects one language for the clip; alternatively the user can hint Hindi or English. | Encoder + decoder + tokens: 160,609,290 bytes |
-| Source highlight | [MediaPipe LLM Inference](https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference/android) 0.10.27, ARM64 CPU. [Qwen2.5-0.5B-Instruct dynamic-int8 `.task`](https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/tree/49bfd323c25c9dae2118906e1f3ffd16e0729b13). This multilingual candidate selects a passage number or abstains. | 546,660,344 bytes |
+| Idle | App installed, mic off, screen locked; no USB power. | Elapsed hours, start/end charge, % and temperature. |
+| Mic only | **Diagnostics: mic-only baseline**, confirm consent, lock for the same interval, Stop. This reads/discards the same mono input without VAD or audio writes. | Same counters, frame-derived capture hours. |
+| Capture + gate + writes | **Start listening**, replay the same mix, lock, Stop without processing. | Same counters, retained speech minutes, pending bytes/chunks, interruptions and missed speech. |
+| Charging throughput | Begin with the same known pending audio, plug in, unlock, keep saver off. Let normal jobs drain. | Audio minutes completed per elapsed hour, peak PSS, temperature/thermal pauses, remaining bytes and failures. Net charging percentage is **not** an energy estimate. |
 
-These are feasibility candidates, not a final model selection. No AICore,
-cloud inference, automatic model updates or unrestricted access to other
-apps. Exact revisions, files and checksums are in
-[`models.json`](../app/src/main/assets/models.json). The importer verifies
-these locally. Incomplete copies cannot be loaded.
-
-[Whisper code and model weights](https://github.com/openai/whisper#license)
-are MIT; the ONNX conversion repository does not publish a separate model
-card. [Qwen's original model](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct)
-and the linked LiteRT conversion identify Apache-2.0. sherpa-onnx and
-MediaPipe are Apache-2.0; ONNX Runtime is MIT. Keep upstream notices with
-copies. Weights are not committed or included in the APK.
-
-## Evidence so far
-
-- Built the ARM64 debug app and its instrumentation APK. The JVM suite covers
-  import limits/encoding, encrypted persistence and tamper rejection,
-  Unicode retrieval, citations, deletion, stale-result rejection, interrupted
-  writes and model verification. Android lint runs separately.
-- **Actual desktop speech run:** the matching sherpa-onnx 1.12.14 CPU CLI
-  loaded the three pinned files. One Windows-synthesized English sentence
-  (“The yellow notebook is beside the window.”) was reproduced. For an
-  eSpeak NG 1.52.0 Hindi voice, auto-detection chose Latin for a Hindi clip
-  and English for a mixed clip. The Hindi words were misrecognized; part of
-  the English clause survived. Forcing `hi` did not repair the two clips.
-  Artificial pronunciation and two examples are not a handset quality score.
-- The Qwen file's size and digest were verified and it contains the LiteRT
-  graph, tokenizer and chat metadata. **A valid bundle is not a successful
-  generation.** Neither Android native inference path, mic lifecycle nor
-  Keystore has been exercised on an 8T in this milestone.
-
-## Run on a test OnePlus 8T
-
-Use synthetic or explicitly consented inputs. Record only the OS/API level,
-RAM variant, build/model pins and aggregate findings. Do not collect mail,
-messages, device identifiers, private recordings, logs containing content,
-or a phone-wide bug report. A target device is necessary: Snapdragon 865
-and an unspecified 8/12 GB variant are not performance measurements.
-
-1. Install the APK and models following the README. Disconnect USB data if
-   desired; turn on airplane mode and turn Wi-Fi off. With models **absent**,
-   verify notes/search/deletion and the explicit setup buttons. Try the wrong
-   file, duplicate files, insufficient space, then a valid install.
-2. Make a note and import a different UTF-8 note. Restart; open a hit, check
-   its line against the saved source, generate a highlight and inspect the
-   quote. If the engine returns unrelated prose or a bad number, expect **no
-   grounded highlight**. Test Hindi, English and mixed notes independently.
-3. Speak separate short English, Hindi and code-switched clips. Example test
-   scripts: “The yellow notebook is beside the window”, “नीली किताब मेज़ पर है”,
-   and “कल की meeting Friday को है। Bring the blue notebook.” Compare Auto
-   and Hindi hints. Mark omitted/changed names, dates, numbers, script
-   changes and words on either side of a switch. Don't infer quality from
-   language detection or one correct sentence. If recall-critical words are
-   repeatedly lost, compare a larger multilingual or code-switch-trained
-   candidate before choosing a release model.
-4. Deny/revoke the mic grant. While capturing, lock the screen, press Home,
-   pull down the notification shade, contend for the mic, and force-stop the
-   app. The mic should stop, drafts should not auto-save, and the next launch
-   must not resume recording. Also check the 25-second cap and silent input.
-5. Forget a source while its highlight is running, then wait and restart.
-   The source, search hit and quote must stay gone. Confirm that forgetting
-   an import leaves the picker original intact. Check restore/device transfer
-   with **synthetic** data only: there should be no recoverable notebook.
-6. Measure cold model load + inference time and repeated runs separately,
-   audio duration, time to draft, valid-citation/abstention count, peak app
-   PSS sampled through each run (`adb shell dumpsys meminfo dev.phonememory`),
-   thermal status and battery energy over repeated matched-duration runs vs
-   an idle-screen control. Keep screen brightness and charging state fixed.
-   No latency, battery-life or memory targets have been demonstrated yet.
-
-On a **dedicated test device**, `./gradlew :app:connectedDebugAndroidTest`
-checks Android Keystore and manifest restrictions. After installing both the
-app and test APK and importing the text model, run this optional **real CPU**
-model probe; it fails if no valid grounded selection is returned:
-
-```shell
-adb shell am instrument -w -e modelSmoke true -e class dev.phonememory.DeviceSmoke dev.phonememory.test/androidx.test.runner.AndroidJUnitRunner
-```
-
-## Storage and deletion boundary
-
-Each immutable source is AES-256-GCM encrypted with an Android Keystore key,
-a fresh IV, and record ID/version authenticated as associated data. Origin,
-timestamp and text are inside the ciphertext in credential-protected
-`noBackupFilesDir`. New records are published by atomic rename; interrupted
-partials are discarded, not replayed. A missing key or failed authentication
-doesn't reset a nonempty notebook. There is no plaintext database, disk
-search index, saved chat history or stored highlight. Capture buffers and
-unreviewed results stay in RAM. Synchronous native work may take time to
-return after cancellation, but it cannot write a source or publish a stale
-result. Only a user save creates a memory.
-
-Backup is disabled and cloud/device-transfer exclusions are explicit. The
-app uses a secure window, asks IMEs not to learn text, and does not request
-persistable URI grants or log personal content. Use a trusted offline
-keyboard and choose local files; a third-party keyboard or file provider is
-outside the app's boundary. Forget is logical deletion of the app's copy,
-not forensic erasure of flash, other apps' files, or a defense against a
-rooted device, a debugger or an already-unlocked phone.
+Use **View local diagnostics** and the session details after Stop. Charge
+counter units are µAh (`BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER`);
+unavailable is not zero. On a dedicated test device, Android's
+`adb shell dumpsys batterystats --reset` before a run and
+`adb shell dumpsys batterystats dev.phonememory` after it provide a secondary
+app-scoped check. Do not collect a whole-phone bugreport. Sample matching
+idle endpoints with a charge counter or external meter, and avoid attaching
+a charging USB cable during an unplugged run. Report `(start−end)/1000` mAh,
+mAh/hour and percentage points/hour, and subtract idle mAh/hour for incremental
+cost. Record the measurement method; if no trustworthy counter/meter is
+available, report percentage only. Do not extrapolate a day of operation
+without a sustained handset run and an agreed battery/quality budget.

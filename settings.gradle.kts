@@ -18,6 +18,17 @@ dependencyResolutionManagement {
             }
             filter { includeGroup("com.k2fsa") }
         }
+        exclusiveContent {
+            forRepository {
+                ivy {
+                    name = "sileroWeights"
+                    url = uri("https://raw.githubusercontent.com/snakers4/silero-vad")
+                    patternLayout { artifact("[revision]/src/silero_vad/data/[artifact].[ext]") }
+                    metadataSources { artifact() }
+                }
+            }
+            filter { includeGroup("org.silero") }
+        }
     }
 }
 
