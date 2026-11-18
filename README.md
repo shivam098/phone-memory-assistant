@@ -5,8 +5,101 @@ An Android-first personal memory assistant that uses the phone you already own.
 **[Cross-platform product specification](docs/product-spec.md)**: shared behavior,
 native adapter guidance and release tests for Android, iOS, macOS and Windows.
 
-**Status:** Android has an unpublished test prototype, not a released app.
-Native-device validation and the three-language offline release gate remain open.
+**Status:** The Android test prototype is published here as source, not as a
+production release. Its speech and text models are imported separately.
+OnePlus 8T validation is pending, including battery use and recognition
+quality in Hindi, English and mixed Hinglish. Early desktop speech tests
+misrecognized Hindi and code-switched clips.
+
+## Try the notebook
+
+1. Install the debug APK on an ARM64 Android 10+ test phone. Start in airplane
+   mode; no sign-in, API key, assistant service or microphone grant is needed for notes.
+2. Type a note, or tap **Import UTF-8 text** and choose one local plain-text
+   file. Review the draft, then **Save locally**. Imports are copies, not live
+   connections. This milestone allows 100 sources; a single note, import or
+   transcript passage is limited to 16 KiB. A session can have many passages.
+3. In **Recall**, enter words from a line. Each result quotes the saved source
+   and gives its reference and line number. Tap to read it. This is literal
+   Unicode text search, not a generated answer or cross-script translation.
+4. Open a source and **Forget source**. Its notebook copy and derived matches
+   disappear, including after restart. The app does not delete the original
+   file outside the notebook.
+
+### Optional offline models
+
+The APK has **no `INTERNET` permission**. To acquire weights, run the following
+on a **computer** with Node.js 20+ (or download the exact files from the
+[pinned catalog](app/src/main/assets/models.json)). No account is needed.
+
+```shell
+node tools/fetch-models.mjs speech
+node tools/fetch-models.mjs text
+```
+
+Copy the `local-models/speech` and `local-models/text` folders to the phone
+over USB. In **Manage local models**, long-press and select **all three speech
+files together**, then select the single `.task` file for text. The importer
+checks byte sizes and SHA-256 before activating a complete set. It doesn't
+trust provider filenames or accept an English-only substitute. Allow room for
+the picker copies, the app's own copies (~675 MiB combined) and runtime cache.
+The picker copies can be removed after successful installation.
+
+- **Listening:** get everyone's permission, then tap **Start listening** and
+  confirm. Granting Android permissions never starts the mic. The session can
+  continue through screen lock and switching apps with notification controls.
+  Pause/Stop from the notification. Opening the app, unlocking, charging,
+  rebooting and service recreation never resume capture. The app declines to
+  start if the controls are blocked. No ASR model is required to capture.
+- **Speech:** a loudness gate followed by bundled, MIT-licensed Silero VAD
+  selects speech and short padding. Lossless FLAC chunks accumulate in a
+  bounded encrypted queue. Battery saver or the configurable low-battery
+  threshold (default 15%) pauses capture. **These are guards, not a battery-life
+  guarantee.** See pending duration/bytes before relying on Recall.
+- **Transcription:** normal jobs run on external power with battery not low,
+  saver off and safe thermal status. After the first unlock since restart,
+  they can transcribe queued speech **while the phone is locked**. They cannot
+  read saved memories. A locked job seals its new transcript and any
+  model-selected excerpt before deleting its input. The content-free status
+  **“Transcribed overnight — available after unlock”** does not mean the result
+  is searchable yet. Unlock-time verification rejects changed or forgotten
+  inputs before making passages available. For an urgent
+  query, open a session and **Process now** for a chosen recent time window.
+  Local ASR passages are stored as **unreviewed**, with model provenance and
+  coarse chunk timing. Review/correcting is optional. Successful publication
+  deletes the corresponding raw audio. Failure or cancellation leaves
+  unfinished audio queued. There is no cloud fallback.
+- **Text:** open a saved source and tap **Find a highlight**. A local text
+  model selects one of up to six short passages. Only a valid selection is
+  displayed, as a verbatim excerpt with a citation. This is **extractive**:
+  no free-form advice, generated facts or actions. Missing models, bad
+  imports, interrupted work and unsupported output do not produce fake results.
+
+M1 notes/imports/reviewed transcripts migrate locally with their IDs and
+timestamps on first unlock. After upgrading from M2, open the app once with
+a secure screen lock unlocked to migrate pending audio and provision the
+overnight key. **Tradeoff:** access equivalent to the background worker on a
+stolen, already-booted phone can expose still-pending audio. That access does
+not decrypt the saved journal or closed results. Upgrade in place using the same signing key;
+uninstalling first deletes the notebook. Use synthetic data for this build.
+
+See the [model evidence and handset test guide](docs/handset-check.md) for
+licenses, limitations and the tests needed before using this for real memories.
+
+### Build
+
+Use JDK 17, Android SDK Platform 35 and Build Tools 35.0.0. Set `ANDROID_HOME`
+or configure `sdk.dir` in the ignored `local.properties`. The first **build**
+fetches Gradle/dependencies; running the app does not. No NDK build is required.
+
+```shell
+./gradlew :core:test :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+Use `gradlew.bat` on Windows. The installable app is
+`app/build/outputs/apk/debug/app-debug.apk` (not the instrumentation APK).
+`:core:test` can run without an Android SDK. The debug build is for synthetic
+test data, not a signed production distribution.
 
 ## Product direction
 

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<verification-metadata xmlns="https://schema.gradle.org/dependency-verification">
+    <configuration>
+        <verify-metadata>false</verify-metadata>
+        <verify-signatures>false</verify-signatures>
+        <!-- Maven dependencies use Google/Maven Central; additionally pin the upstream release AAR. -->
+        <trusted-artifacts>
+            <trust group="^(?!com\.k2fsa$|org\.silero$).+" regex="true"/>
+        </trusted-artifacts>
+    </configuration>
+    <components>
+        <component group="org.silero" name="silero_vad" version="6478567951ae5c9979ad7b234185b5515f4be7a1">
+            <artifact name="silero_vad-6478567951ae5c9979ad7b234185b5515f4be7a1.onnx">
+                <sha256 value="2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f"/>
+            </artifact>
+        </component>
+        <component group="com.k2fsa" name="sherpa-onnx-static-link-onnxruntime" version="1.12.14">
+            <artifact name="sherpa-onnx-static-link-onnxruntime-1.12.14.aar">
+                <sha256 value="05532ae681f14f13e22642db950b96ba20326db0d3da4fabf0b058ad6cd41f66"/>
+            </artifact>
+        </component>
+    </components>
+</verification-metadata>
